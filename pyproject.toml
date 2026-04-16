@@ -23,7 +23,7 @@ dev = [
 ]
 
 [project.scripts]
-modeldock = "modeldock.cli:app"
+miner-cli = "miner_cli.cli:app"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
@@ -32,7 +32,7 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-modeldock = ["templates/*.j2"]
+miner_cli = ["templates/*.j2"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

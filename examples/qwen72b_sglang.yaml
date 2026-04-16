@@ -20,7 +20,7 @@ dcgm_exporter:
   enabled: true
 miner_client:
   enabled: true
-  image: your-registry/miner-client:latest
+  image: your-registry/miner:latest
   listen_port: 7070
   host_port: 17070
   environment:

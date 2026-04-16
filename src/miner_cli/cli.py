@@ -23,7 +23,7 @@ STATUS_COLOR = {"ok": "green", "warn": "yellow", "fail": "red"}
 
 
 def _print_doctor_results(checks: list[CheckResult]) -> None:
-    table = Table(title="Modeldock Doctor")
+    table = Table(title="Miner CLI Doctor")
     table.add_column("Check")
     table.add_column("Status")
     table.add_column("Detail")
@@ -199,7 +199,7 @@ def rm(
 def list_deployments() -> None:
     """List known deployment directories."""
     root = DEFAULT_DEPLOYMENTS_DIR
-    table = Table(title="Modeldock Deployments")
+    table = Table(title="Miner CLI Deployments")
     table.add_column("Name")
     table.add_column("Path")
     if not root.exists():

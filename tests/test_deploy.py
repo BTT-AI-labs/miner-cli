@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from modeldock.config import DeploymentConfig
-from modeldock.deploy import build_launch_command, render_extra_services
+from miner_cli.config import DeploymentConfig
+from miner_cli.deploy import build_launch_command, render_extra_services
 
 
 def test_build_launch_command_for_sglang_includes_expected_flags() -> None:

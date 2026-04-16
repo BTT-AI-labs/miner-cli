@@ -1,6 +1,6 @@
-# Modeldock
+# Miner CLI
 
-`modeldock` is a small Docker-based deployment helper for running large language models on a single Ubuntu host with NVIDIA GPUs.
+`miner-cli` is a small Docker-based deployment helper for running large language models on a single Ubuntu host with NVIDIA GPUs.
 
 It is intentionally narrow:
 
@@ -22,16 +22,16 @@ It is intentionally narrow:
 ## Install
 
 ```bash
-cd modeldock
-pip install -e .
+cd miner-cli
+uv sync
 ```
 
 For local development:
 
 ```bash
-pip install -e ".[dev]"
-pytest
-ruff check .
+uv sync --extra dev
+uv run pytest
+uv run --extra dev ruff check .
 ```
 
 ## Quick Start
@@ -39,7 +39,7 @@ ruff check .
 Generate a starter config:
 
 ```bash
-modeldock init qwen35 \
+uv run miner-cli init qwen35 \
   --engine sglang \
   --model Qwen/Qwen2.5-72B-Instruct \
   --tp 8 \
@@ -49,40 +49,40 @@ modeldock init qwen35 \
 Run host checks:
 
 ```bash
-modeldock doctor
+uv run miner-cli doctor
 ```
 
 Run host + deployment checks against a config:
 
 ```bash
-modeldock doctor -f qwen35.yaml
+uv run miner-cli doctor -f qwen35.yaml
 ```
 
 Start the deployment:
 
 ```bash
 export HF_TOKEN=hf_xxx
-modeldock up -f qwen35.yaml
+uv run miner-cli up -f qwen35.yaml
 ```
 
 Skip the deployment-time smoke test if you have already verified Docker GPU access:
 
 ```bash
-modeldock up -f qwen35.yaml --skip-smoke-test
+uv run miner-cli up -f qwen35.yaml --skip-smoke-test
 ```
 
 Inspect the deployment:
 
 ```bash
-modeldock status qwen35
-modeldock logs qwen35 -f
+uv run miner-cli status qwen35
+uv run miner-cli logs qwen35 -f
 ```
 
 Stop and remove:
 
 ```bash
-modeldock stop qwen35
-modeldock rm qwen35 --purge-files
+uv run miner-cli stop qwen35
+uv run miner-cli rm qwen35 --purge-files
 ```
 
 ## Example Config
@@ -124,7 +124,7 @@ For the `miner-client` sidecar, use `miner_client`:
 ```yaml
 miner_client:
   enabled: true
-  image: your-registry/miner-client:latest
+  image: your-registry/miner:latest
   listen_port: 7070
   host_port: 17070
   upstream_http_url: http://your-http-service.internal:9000/api
@@ -135,7 +135,7 @@ miner_client:
     MINER_TARGET_MODEL: Qwen/Qwen2.5-72B-Instruct
 ```
 
-When `miner_client.enabled` is `true`, modeldock generates a service in the same Docker Compose network and injects these environment variables by default:
+When `miner_client.enabled` is `true`, `miner-cli` generates a service in the same Docker Compose network and injects these environment variables by default:
 
 - `MODELDOCK_DEPLOYMENT_NAME=<deployment-name>`
 - `MODELDOCK_ENGINE=<engine>`
@@ -146,12 +146,12 @@ When `miner_client.enabled` is `true`, modeldock generates a service in the same
 - `MINER_HTTP_PORT=<listen_port>`
 - `MINER_VLLM_BASE_URL=http://<deployment-name>:<port>`
 
-If `dcgm_exporter.enabled` is also `true`, modeldock also injects:
+If `dcgm_exporter.enabled` is also `true`, `miner-cli` also injects:
 
 - `MODELDOCK_DCGM_EXPORTER_URL=http://dcgm-exporter:9400/metrics`
 - `MINER_DCGM_METRICS_URL=http://dcgm-exporter:9400/metrics`
 
-If `miner_client.upstream_http_url` is set, modeldock also injects:
+If `miner_client.upstream_http_url` is set, `miner-cli` also injects:
 
 - `UPSTREAM_HTTP_URL=<configured-url>`
 
@@ -186,7 +186,7 @@ Backward compatibility:
 - `custom_service` is still accepted as a legacy alias for `miner_client`
 - do not set both fields in the same config
 
-When `metrics_collector.enabled` is `true`, modeldock generates a collector service in the same Docker Compose network as the inference container and `dcgm-exporter`. The collector gets these environment variables by default:
+When `metrics_collector.enabled` is `true`, `miner-cli` generates a collector service in the same Docker Compose network as the inference container and `dcgm-exporter`. The collector gets these environment variables by default:
 
 - `INFERENCE_METRICS_URL=http://<deployment-name>:<port>/metrics`
 - `DCGM_EXPORTER_URL=http://dcgm-exporter:9400/metrics`
@@ -195,11 +195,11 @@ When `metrics_collector.enabled` is `true`, modeldock generates a collector serv
 - `COLLECTOR_HTTP_HOST=0.0.0.0`
 - `COLLECTOR_HTTP_PORT=<listen_port>`
 
-If `metrics_collector.upstream_http_url` is set, modeldock also injects:
+If `metrics_collector.upstream_http_url` is set, `miner-cli` also injects:
 
 - `UPSTREAM_HTTP_URL=<configured-url>`
 
-The collector exposes its own HTTP port inside the Compose network automatically. If you set `metrics_collector.host_port`, modeldock also publishes it on the host as `<host_port>:<listen_port>`.
+The collector exposes its own HTTP port inside the Compose network automatically. If you set `metrics_collector.host_port`, `miner-cli` also publishes it on the host as `<host_port>:<listen_port>`.
 
 You can override the generated defaults with:
 
@@ -226,12 +226,12 @@ Use `extra_services` only for unrelated sidecars that should not be coupled to t
 
 - This MVP assumes Docker, Docker Compose, NVIDIA drivers, and NVIDIA Container Toolkit are already installed.
 - The default image names are placeholders that should be validated against the images you want to support in production.
-- Deployment files are rendered into `~/.modeldock/deployments/<name>/`.
+- Deployment files are rendered into `~/.miner-cli/deployments/<name>/`.
 - `doctor` stays lightweight: Linux/Ubuntu basics, architecture, Docker daemon access, GPU inventory, `/dev/shm`, disk headroom, DNS, and config-specific fit such as open ports and tensor-parallel vs GPU count.
 - `up` performs the heavier GPU container smoke test because that check pulls and runs a CUDA image.
 
 ## Engineering Notes
 
-- Core config validation lives in `modeldock.config`, so YAML parsing and semantic checks are testable without invoking the CLI.
-- Deployment rendering stays in `modeldock.deploy`, including compose-sidecar generation for observability services.
+- Core config validation lives in `miner_cli.config`, so YAML parsing and semantic checks are testable without invoking the CLI.
+- Deployment rendering stays in `miner_cli.deploy`, including compose-sidecar generation for observability services.
 - CLI commands are intentionally thin wrappers around config, doctor, and deployment modules.

@@ -285,7 +285,7 @@ def render_extra_services(config: DeploymentConfig) -> str:
 def render_compose(config: DeploymentConfig) -> str:
     template_name = f"{config.engine}_compose.yaml.j2"
     template_text = (
-        resources.files("modeldock")
+        resources.files("miner_cli")
         .joinpath("templates", template_name)
         .read_text(encoding="utf-8")
     )

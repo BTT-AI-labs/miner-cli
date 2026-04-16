@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from modeldock.config import DeploymentConfig, default_image_for_engine
+from miner_cli.config import DeploymentConfig, default_image_for_engine
 
 
 def test_from_dict_normalizes_and_validates_string_fields() -> None:
