@@ -1,0 +1,101 @@
+from __future__ import annotations
+
+import pytest
+
+from modeldock.config import DeploymentConfig
+from modeldock.deploy import build_launch_command, render_extra_services
+
+
+def test_build_launch_command_for_sglang_includes_expected_flags() -> None:
+    config = DeploymentConfig(
+        name="demo",
+        engine="sglang",
+        model="Qwen/Qwen2.5-7B-Instruct",
+        tensor_parallel=4,
+        max_model_len=8192,
+        api_key="secret",
+        extra_args=["--tool-call-parser", "hermes"],
+    )
+
+    command = build_launch_command(config)
+
+    assert "sglang.launch_server" in command
+    assert "'--tp' '4'" in command
+    assert "'--context-length' '8192'" in command
+    assert "'--api-key' 'secret'" in command
+    assert "'--tool-call-parser' 'hermes'" in command
+
+
+def test_render_extra_services_includes_dcgm_and_metrics_collector() -> None:
+    config = DeploymentConfig(
+        name="demo",
+        engine="sglang",
+        model="Qwen/Qwen2.5-7B-Instruct",
+        dcgm_exporter={"enabled": True},
+        metrics_collector={
+            "enabled": True,
+            "image": "example/collector:latest",
+            "listen_port": 9090,
+            "host_port": 19090,
+        },
+    )
+
+    rendered = render_extra_services(config)
+
+    assert "dcgm-exporter:" in rendered
+    assert "metrics-collector:" in rendered
+    assert "INFERENCE_METRICS_URL: http://demo:8000/metrics" in rendered
+    assert "19090:9090" in rendered
+
+
+def test_render_extra_services_includes_miner_client() -> None:
+    config = DeploymentConfig(
+        name="demo",
+        engine="sglang",
+        model="Qwen/Qwen2.5-7B-Instruct",
+        dcgm_exporter={"enabled": True},
+        miner_client={
+            "enabled": True,
+            "image": "example/miner-client:latest",
+            "listen_port": 7070,
+            "host_port": 17070,
+            "upstream_http_url": "http://internal-service:9000/api",
+        },
+    )
+
+    rendered = render_extra_services(config)
+
+    assert "miner-client:" in rendered
+    assert "MODELDOCK_INFERENCE_BASE_URL: http://demo:8000" in rendered
+    assert "MODELDOCK_OPENAI_BASE_URL: http://demo:8000/v1" in rendered
+    assert "MODELDOCK_DCGM_EXPORTER_URL: http://dcgm-exporter:9400/metrics" in rendered
+    assert "MINER_HTTP_HOST: 0.0.0.0" in rendered
+    assert "MINER_HTTP_PORT: '7070'" in rendered
+    assert "MINER_VLLM_BASE_URL: http://demo:8000" in rendered
+    assert "MINER_DCGM_METRICS_URL: http://dcgm-exporter:9400/metrics" in rendered
+    assert "UPSTREAM_HTTP_URL: http://internal-service:9000/api" in rendered
+    assert "17070:7070" in rendered
+
+
+def test_render_extra_services_requires_miner_client_image() -> None:
+    config = DeploymentConfig(
+        name="demo",
+        engine="vllm",
+        model="Qwen/Qwen2.5-7B-Instruct",
+        miner_client={"enabled": True},
+    )
+
+    with pytest.raises(ValueError, match="miner_client.image is required"):
+        render_extra_services(config)
+
+
+def test_render_extra_services_requires_collector_image() -> None:
+    config = DeploymentConfig(
+        name="demo",
+        engine="vllm",
+        model="Qwen/Qwen2.5-7B-Instruct",
+        metrics_collector={"enabled": True},
+    )
+
+    with pytest.raises(ValueError, match="metrics_collector.image is required"):
+        render_extra_services(config)

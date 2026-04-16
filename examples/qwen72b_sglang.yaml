@@ -1,0 +1,30 @@
+name: qwen72b
+engine: sglang
+model: Qwen/Qwen2.5-72B-Instruct
+image: lmsysorg/sglang:latest
+host: 0.0.0.0
+port: 8000
+tensor_parallel: 8
+gpu_ids: all
+trust_remote_code: true
+dtype: bfloat16
+max_model_len: 32768
+hf_token_env: HF_TOKEN
+hf_cache: /data/huggingface
+shm_size: 16g
+extra_args:
+  - --schedule-policy
+  - fcfs
+env: {}
+dcgm_exporter:
+  enabled: true
+miner_client:
+  enabled: true
+  image: your-registry/miner-client:latest
+  listen_port: 7070
+  host_port: 17070
+  environment:
+    LOG_LEVEL: info
+    MAIN_API_BASE_URL: https://main-api.example.com
+    MINER_TOKEN: replace-me
+    MINER_TARGET_MODEL: Qwen/Qwen2.5-72B-Instruct

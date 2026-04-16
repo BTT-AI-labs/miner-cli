@@ -1,0 +1,27 @@
+services:
+  {{ name }}:
+    image: {{ image }}
+    container_name: {{ name }}
+    restart: unless-stopped
+    shm_size: "{{ shm_size }}"
+    gpus: {{ gpu_ids }}
+    ports:
+      - "{{ port }}:{{ port }}"
+    volumes:
+      - "{{ hf_cache }}:/root/.cache/huggingface"
+    environment:
+      - {{ hf_token_env }}=${{ hf_token_env }}
+      - HF_HOME=/root/.cache/huggingface
+      - HUGGINGFACE_HUB_CACHE=/root/.cache/huggingface/hub
+      - TRANSFORMERS_CACHE=/root/.cache/huggingface/hub
+{% for key, value in env.items() %}
+      - {{ key }}={{ value }}
+{% endfor %}
+    command:
+      - sh
+      - -lc
+      - {{ launch_command | tojson }}
+{% if extra_services_yaml %}
+
+{{ extra_services_yaml }}
+{% endif %}
