@@ -6,7 +6,6 @@ from typing import Any, Mapping
 
 import yaml
 
-
 DEFAULT_DEPLOYMENTS_DIR = Path.home() / ".miner-cli" / "deployments"
 SUPPORTED_ENGINES = frozenset({"sglang", "vllm"})
 

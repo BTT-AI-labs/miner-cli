@@ -6,11 +6,11 @@ import socket
 import subprocess
 import time
 from dataclasses import dataclass
+from importlib import resources
 from pathlib import Path
 
-from importlib import resources
-from jinja2 import Template
 import yaml
+from jinja2 import Template
 
 from .config import DEFAULT_DEPLOYMENTS_DIR, DeploymentConfig, default_image_for_engine
 
