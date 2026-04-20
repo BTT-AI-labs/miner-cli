@@ -1,6 +1,6 @@
 # Miner CLI
 
-`miner-cli` is a small Docker-based deployment helper for running large language models on a single Ubuntu host with NVIDIA GPUs.
+`miner-cli` is a small Docker-based deployment helper for running large language models on a single Linux host with NVIDIA GPUs.
 
 It is intentionally narrow:
 
@@ -50,6 +50,20 @@ Run host checks:
 
 ```bash
 uv run miner-cli doctor
+```
+
+Prepare the host toolkit first if Docker or NVIDIA container support is not ready:
+
+```bash
+uv run miner-cli toolkit install
+uv run miner-cli toolkit verify --smoke-test
+```
+
+Prepare the `vllm` runtime before deployment:
+
+```bash
+export HF_TOKEN=hf_xxx
+uv run miner-cli runtime prepare --engine vllm
 ```
 
 Run host + deployment checks against a config:
@@ -225,6 +239,10 @@ Use `extra_services` only for unrelated sidecars that should not be coupled to t
 ## Notes
 
 - This MVP assumes Docker, Docker Compose, NVIDIA drivers, and NVIDIA Container Toolkit are already installed.
+- `toolkit verify` is the most portable path and is intended to work across Linux distributions.
+- `toolkit install` uses distro-family backends for `debian`, `rhel`, and `arch` style systems and performs privileged host changes through installer scripts.
+- On unsupported distributions, `toolkit install` stops early and prints manual installation guidance instead of guessing.
+- `toolkit verify` and `runtime prepare` are the recommended preparation steps before `up` when a host is not already ready.
 - The default image names are placeholders that should be validated against the images you want to support in production.
 - Deployment files are rendered into `~/.miner-cli/deployments/<name>/`.
 - `doctor` stays lightweight: Linux/Ubuntu basics, architecture, Docker daemon access, GPU inventory, `/dev/shm`, disk headroom, DNS, and config-specific fit such as open ports and tensor-parallel vs GPU count.

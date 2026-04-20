@@ -13,6 +13,7 @@ import yaml
 from jinja2 import Template
 
 from .config import DEFAULT_DEPLOYMENTS_DIR, DeploymentConfig, default_image_for_engine
+from .preparation import ProgressLogger
 
 
 @dataclass
@@ -349,11 +350,14 @@ def service_url(config: DeploymentConfig) -> str:
     return f"http://127.0.0.1:{config.port}"
 
 
-def wait_for_ready(config: DeploymentConfig, timeout: int = 900) -> None:
+def wait_for_ready(
+    config: DeploymentConfig, timeout: int = 900, progress: ProgressLogger | None = None
+) -> None:
     import urllib.error
     import urllib.request
 
     deadline = time.time() + timeout
+    last_log_at = 0.0
     url = f"{service_url(config)}/v1/models"
     while time.time() < deadline:
         try:
@@ -361,6 +365,9 @@ def wait_for_ready(config: DeploymentConfig, timeout: int = 900) -> None:
                 if response.status == 200:
                     return
         except (urllib.error.URLError, TimeoutError, ConnectionError, OSError):
+            if progress is not None and time.time() - last_log_at >= 10:
+                progress(f"Waiting for readiness: {url}")
+                last_log_at = time.time()
             time.sleep(2)
     raise TimeoutError(f"Service did not become ready within {timeout}s: {url}")
 

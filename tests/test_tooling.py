@@ -1,0 +1,188 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from typer.testing import CliRunner
+
+from miner_cli.cli import app
+from miner_cli.preparation import CheckResult
+from miner_cli.runtime_prepare import prepare_runtime
+from miner_cli.toolkit import (
+    HostProfile,
+    _component_is_ready,
+    _post_install_guidance,
+    _summarize_process_output,
+    detect_host_profile,
+    install_toolkit,
+    installer_script_for,
+    manual_install_instructions,
+    verify_toolkit_host,
+)
+
+
+def test_detect_host_profile_supports_ubuntu_x86(monkeypatch, tmp_path: Path) -> None:
+    os_release = tmp_path / "os-release"
+    os_release.write_text('ID="ubuntu"\nVERSION_ID="22.04"\n', encoding="utf-8")
+    monkeypatch.setattr("miner_cli.toolkit.platform.system", lambda: "Linux")
+    monkeypatch.setattr("miner_cli.toolkit.platform.machine", lambda: "x86_64")
+
+    profile = detect_host_profile(os_release_path=os_release)
+
+    assert profile.supported is True
+    assert profile.family == "debian"
+    assert profile.identifier == "debian-ubuntu-22.04"
+
+
+def test_detect_host_profile_supports_rocky(monkeypatch, tmp_path: Path) -> None:
+    os_release = tmp_path / "os-release"
+    os_release.write_text('ID="rocky"\nVERSION_ID="9.4"\n', encoding="utf-8")
+    monkeypatch.setattr("miner_cli.toolkit.platform.system", lambda: "Linux")
+    monkeypatch.setattr("miner_cli.toolkit.platform.machine", lambda: "x86_64")
+
+    profile = detect_host_profile(os_release_path=os_release)
+
+    assert profile.supported is True
+    assert profile.family == "rhel"
+
+
+def test_detect_host_profile_supports_arch(monkeypatch, tmp_path: Path) -> None:
+    os_release = tmp_path / "os-release"
+    os_release.write_text('ID="arch"\nVERSION_ID="rolling"\n', encoding="utf-8")
+    monkeypatch.setattr("miner_cli.toolkit.platform.system", lambda: "Linux")
+    monkeypatch.setattr("miner_cli.toolkit.platform.machine", lambda: "x86_64")
+
+    profile = detect_host_profile(os_release_path=os_release)
+
+    assert profile.supported is True
+    assert profile.family == "arch"
+
+
+def test_install_toolkit_rejects_unsupported_host(monkeypatch) -> None:
+    monkeypatch.setattr("miner_cli.toolkit.platform.system", lambda: "Darwin")
+
+    checks = install_toolkit()
+
+    assert len(checks) == 2
+    assert checks[0].status == "fail"
+    assert "unsupported" in checks[0].detail
+    assert checks[1].label == "manual install"
+
+
+def test_installer_script_for_debian_profile() -> None:
+    profile = HostProfile("debian-ubuntu-24.04", "debian", "ubuntu", "24.04", "x86_64", True)
+
+    assert installer_script_for("docker", profile) == "install_docker_linux.sh"
+    assert installer_script_for("docker-user-access", profile) == "ensure_docker_user_group.sh"
+    assert (
+        installer_script_for("nvidia-container-toolkit", profile)
+        == "install_nvidia_container_toolkit_debian.sh"
+    )
+
+
+def test_manual_install_instructions_for_arch() -> None:
+    profile = HostProfile("arch-arch-rolling", "arch", "arch", "rolling", "x86_64", True)
+
+    assert "pacman" in manual_install_instructions(profile)
+
+
+def test_component_is_ready_requires_ok_for_docker_user_access() -> None:
+    checks = [CheckResult("docker permissions", "warn", "user may need docker group membership")]
+
+    assert _component_is_ready("docker-user-access", checks) is False
+
+
+def test_verify_toolkit_host_includes_smoke_test(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "miner_cli.toolkit.host_checks",
+        lambda: [CheckResult("docker cli", "ok", "ready")],
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "miner_cli.doctor.host_checks",
+        lambda: [CheckResult("docker cli", "ok", "ready")],
+    )
+    monkeypatch.setattr(
+        "miner_cli.doctor.gpu_container_smoke_test",
+        lambda progress=None: CheckResult("gpu container smoke test", "ok", "ready"),
+    )
+
+    checks = verify_toolkit_host(include_smoke_test=True)
+
+    assert [check.label for check in checks] == ["docker cli", "gpu container smoke test"]
+
+
+def test_prepare_runtime_rejects_unsupported_engine() -> None:
+    checks = prepare_runtime(engine="sglang")
+
+    assert checks == [CheckResult("runtime engine", "fail", "unsupported engine: sglang")]
+
+
+def test_prepare_runtime_uses_config_file(monkeypatch, tmp_path: Path) -> None:
+    config_path = tmp_path / "demo.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "name: demo",
+                "engine: vllm",
+                "model: Qwen/Qwen2.5-7B-Instruct",
+                "hf_cache: ./hf-cache",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "miner_cli.runtime_prepare.config_checks",
+        lambda config: [CheckResult("engine image", "ok", config.image or "default")],
+    )
+    monkeypatch.setattr(
+        "miner_cli.runtime_prepare._pull_image",
+        lambda image, progress=None: CheckResult("runtime image pull", "ok", image),
+    )
+
+    checks = prepare_runtime(engine="vllm", config_file=config_path)
+
+    labels = [check.label for check in checks]
+    assert "runtime engine" in labels
+    assert "runtime cache path" in labels
+    assert "runtime image pull" in labels
+
+
+def test_runtime_prepare_cli_reports_unsupported_engine() -> None:
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["runtime", "prepare", "--engine", "sglang"])
+
+    assert result.exit_code == 1
+    assert "Unsupported engine" in result.stdout
+
+
+def test_summarize_process_output_prefers_real_error_line() -> None:
+    completed = __import__("subprocess").CompletedProcess(
+        args=["bash", "installer.sh"],
+        returncode=1,
+        stdout="Reading package lists...\n",
+        stderr="E: Unable to locate package docker-ce\n",
+    )
+
+    assert _summarize_process_output(completed) == "E: Unable to locate package docker-ce"
+
+
+def test_post_install_guidance_reports_session_refresh(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "miner_cli.toolkit.verify_toolkit_host",
+        lambda include_smoke_test=False, progress=None: [
+            CheckResult("docker daemon", "ok", "ready"),
+            CheckResult("docker permissions", "warn", "user needs docker group"),
+        ],
+    )
+
+    checks = _post_install_guidance()
+
+    assert checks == [
+        CheckResult(
+            "session refresh",
+            "warn",
+            "docker group membership may need a new shell; run `newgrp docker` or open a new shell session",
+        )
+    ]

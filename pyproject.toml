@@ -28,7 +28,7 @@ package-dir = { "" = "src" }
 where = ["src"]
 
 [tool.setuptools.package-data]
-miner_cli = ["templates/*.j2"]
+miner_cli = ["templates/*.j2", "scripts/*.sh"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

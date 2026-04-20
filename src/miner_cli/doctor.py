@@ -8,18 +8,36 @@ import platform
 import shutil
 import socket
 import subprocess
-from dataclasses import dataclass
 from pathlib import Path
 
 from .config import DeploymentConfig
 from .deploy import default_image, is_port_in_use
+from .preparation import CheckResult, ProgressLogger, run_logged_command
 
 
-@dataclass
-class CheckResult:
-    label: str
-    status: str
-    detail: str
+def _summarize_command_output(result: subprocess.CompletedProcess[str]) -> str:
+    lines = [
+        line.strip()
+        for line in (result.stdout.splitlines() + result.stderr.splitlines())
+        if line.strip()
+    ]
+    if not lines:
+        return f"exit={result.returncode}"
+
+    priority_markers = (
+        "permission denied",
+        "cannot connect",
+        "is the docker daemon running",
+        "error",
+        "failed",
+        "denied",
+    )
+    for line in reversed(lines):
+        lower_line = line.lower()
+        if any(marker in lower_line for marker in priority_markers):
+            return line
+
+    return lines[-1]
 
 
 def _run(command: list[str]) -> tuple[bool, str]:
@@ -32,10 +50,10 @@ def _run(command: list[str]) -> tuple[bool, str]:
         )
     except FileNotFoundError:
         return False, "not found"
-    detail = (result.stdout or result.stderr).strip()
     if result.returncode == 0:
-        return True, detail.splitlines()[0] if detail else "ok"
-    return False, detail or f"exit={result.returncode}"
+        detail = _summarize_command_output(result)
+        return True, detail if detail else "ok"
+    return False, _summarize_command_output(result)
 
 
 def _linux_os_checks() -> list[CheckResult]:
@@ -81,7 +99,7 @@ def _linux_os_checks() -> list[CheckResult]:
     return results
 
 
-def _docker_checks() -> list[CheckResult]:
+def docker_checks() -> list[CheckResult]:
     results: list[CheckResult] = []
     ok, detail = _run(["docker", "--version"])
     results.append(CheckResult("docker cli", "ok" if ok else "fail", detail))
@@ -124,7 +142,33 @@ def _docker_checks() -> list[CheckResult]:
     return results
 
 
-def _gpu_checks() -> list[CheckResult]:
+def docker_runtime_checks() -> list[CheckResult]:
+    ok, detail = _run(["docker", "info", "--format", "{{json .Runtimes}}"])
+    if not ok:
+        return [CheckResult("docker nvidia runtime", "warn", detail)]
+    if detail == "null":
+        return [
+            CheckResult(
+                "docker nvidia runtime",
+                "warn",
+                "docker daemon unavailable or current user cannot inspect runtimes",
+            )
+        ]
+    try:
+        runtimes = json.loads(detail)
+    except json.JSONDecodeError:
+        return [CheckResult("docker nvidia runtime", "warn", "unable to parse docker runtimes")]
+    configured = isinstance(runtimes, dict) and "nvidia" in runtimes
+    return [
+        CheckResult(
+            "docker nvidia runtime",
+            "ok" if configured else "fail",
+            "configured" if configured else "not configured",
+        )
+    ]
+
+
+def gpu_checks() -> list[CheckResult]:
     results: list[CheckResult] = []
     ok, detail = _run(["nvidia-smi"])
     results.append(CheckResult("nvidia-smi", "ok" if ok else "fail", detail))
@@ -200,8 +244,9 @@ def _storage_and_network_checks() -> list[CheckResult]:
 def host_checks() -> list[CheckResult]:
     return [
         *_linux_os_checks(),
-        *_docker_checks(),
-        *_gpu_checks(),
+        *docker_checks(),
+        *docker_runtime_checks(),
+        *gpu_checks(),
         *_storage_and_network_checks(),
     ]
 
@@ -319,8 +364,26 @@ def config_checks(config: DeploymentConfig) -> list[CheckResult]:
     return results
 
 
-def gpu_container_smoke_test() -> CheckResult:
-    ok, detail = _run(
+def gpu_container_smoke_test(progress: ProgressLogger | None = None) -> CheckResult:
+    if progress is None:
+        ok, detail = _run(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--gpus",
+                "all",
+                "nvidia/cuda:12.4.1-base-ubuntu22.04",
+                "nvidia-smi",
+            ]
+        )
+        return CheckResult(
+            "gpu container smoke test",
+            "ok" if ok else "fail",
+            detail,
+        )
+
+    result = run_logged_command(
         [
             "docker",
             "run",
@@ -329,10 +392,12 @@ def gpu_container_smoke_test() -> CheckResult:
             "all",
             "nvidia/cuda:12.4.1-base-ubuntu22.04",
             "nvidia-smi",
-        ]
+        ],
+        progress=progress,
     )
+    detail = _summarize_command_output(result)
     return CheckResult(
         "gpu container smoke test",
-        "ok" if ok else "fail",
+        "ok" if result.returncode == 0 else "fail",
         detail,
     )
