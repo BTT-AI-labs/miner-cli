@@ -46,6 +46,17 @@ uv run miner-cli init qwen35 \
   --port 8000
 ```
 
+For `vllm`, `init` currently uses the official upstream default image. If you explicitly want to keep the policy visible in config generation, you can set:
+
+```bash
+uv run miner-cli init qwen35 \
+  --engine vllm \
+  --model Qwen/Qwen2.5-72B-Instruct \
+  --image-policy latest
+```
+
+When the generated or configured `vllm` image is `latest`, `miner-cli` now warns during `init`, `runtime prepare`, and `up` because floating upstream tags can change CUDA and driver requirements without notice.
+
 Run host checks:
 
 ```bash
@@ -244,6 +255,8 @@ Use `extra_services` only for unrelated sidecars that should not be coupled to t
 - On unsupported distributions, `toolkit install` stops early and prints manual installation guidance instead of guessing.
 - `toolkit verify` and `runtime prepare` are the recommended preparation steps before `up` when a host is not already ready.
 - The default image names are placeholders that should be validated against the images you want to support in production.
+- `miner-cli` should only default to tags that are confirmed to exist upstream. Until a verified stable tag policy is maintained in-repo, the generated `vllm` image remains the official upstream default.
+- If you need stricter reproducibility, set `image:` explicitly in your config instead of relying on the generated default.
 - Deployment files are rendered into `~/.miner-cli/deployments/<name>/`.
 - `doctor` stays lightweight: Linux/Ubuntu basics, architecture, Docker daemon access, GPU inventory, `/dev/shm`, disk headroom, DNS, and config-specific fit such as open ports and tensor-parallel vs GPU count.
 - `up` performs the heavier GPU container smoke test because that check pulls and runs a CUDA image.

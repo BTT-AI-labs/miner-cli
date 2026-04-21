@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
 
 from typer.testing import CliRunner
 
 from miner_cli.cli import app
 from miner_cli.preparation import CheckResult
-from miner_cli.runtime_prepare import prepare_runtime
+from miner_cli.runtime_prepare import engine_container_smoke_test, prepare_runtime
 from miner_cli.toolkit import (
     HostProfile,
     _component_is_ready,
@@ -155,6 +156,69 @@ def test_runtime_prepare_cli_reports_unsupported_engine() -> None:
 
     assert result.exit_code == 1
     assert "Unsupported engine" in result.stdout
+
+
+def test_init_cli_warns_on_floating_vllm_image() -> None:
+    runner = CliRunner()
+
+    result = runner.invoke(
+        app,
+        [
+            "init",
+            "demo",
+            "--engine",
+            "vllm",
+            "--model",
+            "Qwen/Qwen2.5-7B-Instruct",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "floating vLLM image" in result.stdout
+
+
+def test_init_cli_rejects_unsupported_image_policy() -> None:
+    runner = CliRunner()
+
+    result = runner.invoke(
+        app,
+        [
+            "init",
+            "demo",
+            "--engine",
+            "vllm",
+            "--model",
+            "Qwen/Qwen2.5-7B-Instruct",
+            "--image-policy",
+            "preview",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "Unsupported image policy" in result.stdout
+
+
+def test_engine_container_smoke_test_warns_for_unknown_engine() -> None:
+    check = engine_container_smoke_test("sglang", "example/image:latest")
+
+    assert check.status == "warn"
+    assert "no smoke test" in check.detail
+
+
+def test_engine_container_smoke_test_for_vllm_uses_vllm_binary(monkeypatch) -> None:
+    seen: dict[str, list[str]] = {}
+
+    def fake_run_logged_command(command, progress=None):
+        seen["command"] = command
+        return subprocess.CompletedProcess(command, 0, stdout="usage: vllm [-h]\n", stderr="")
+
+    monkeypatch.setattr("miner_cli.runtime_prepare.run_logged_command", fake_run_logged_command)
+
+    check = engine_container_smoke_test("vllm", "example/image:latest")
+
+    assert check.status == "ok"
+    assert seen["command"][-2:] == ["example/image:latest", "--help"]
+    assert "--entrypoint" not in seen["command"]
 
 
 def test_summarize_process_output_prefers_real_error_line() -> None:

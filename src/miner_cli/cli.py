@@ -7,7 +7,14 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from .config import DEFAULT_DEPLOYMENTS_DIR, load_config, write_template_config
+from .config import (
+    DEFAULT_DEPLOYMENTS_DIR,
+    SUPPORTED_IMAGE_POLICIES,
+    default_image_for_engine,
+    image_uses_floating_latest,
+    load_config,
+    write_template_config,
+)
 from .deploy import (
     deployment_paths,
     is_port_in_use,
@@ -17,7 +24,7 @@ from .deploy import (
 )
 from .doctor import config_checks, gpu_container_smoke_test, host_checks
 from .preparation import CheckResult, print_results
-from .runtime_prepare import SUPPORTED_RUNTIME_ENGINES, prepare_runtime
+from .runtime_prepare import SUPPORTED_RUNTIME_ENGINES, engine_container_smoke_test, prepare_runtime
 from .toolkit import install_toolkit, verify_toolkit_host
 
 app = typer.Typer(no_args_is_help=True)
@@ -32,6 +39,13 @@ def _print_results(title: str, checks: list[CheckResult]) -> None:
 
 def _progress_log(message: str) -> None:
     console.print(f"[cyan]{message}[/cyan]")
+
+
+def _warn_on_floating_vllm_image(image: str, context: str) -> None:
+    if image_uses_floating_latest(image):
+        console.print(
+            f"[yellow]{context}: `{image}` is a floating vLLM image reference. Upstream changes can raise driver/CUDA requirements unexpectedly; pin `image:` in your config for reproducible deployments.[/yellow]"
+        )
 
 
 def _require_deployment(name: str):
@@ -117,11 +131,20 @@ def init(
     tensor_parallel: int = typer.Option(1, "--tp", help="Tensor parallel degree / GPU count"),
     port: int = typer.Option(8000, help="Exposed API port"),
     image: str | None = typer.Option(None, help="Override the default engine image"),
+    image_policy: str = typer.Option(
+        "stable",
+        help="Default image selection policy: stable or latest",
+    ),
     output: Path = typer.Option(  # noqa: B008
         Path("."), help="Directory to write the template config into"
     ),
 ) -> None:
     """Generate a starter YAML config."""
+    if image_policy not in SUPPORTED_IMAGE_POLICIES:
+        console.print(
+            f"[red]Unsupported image policy: {image_policy}. Supported: {', '.join(sorted(SUPPORTED_IMAGE_POLICIES))}[/red]"
+        )
+        raise typer.Exit(1)
     path = output / f"{name}.yaml"
     write_template_config(
         path,
@@ -131,8 +154,14 @@ def init(
         tensor_parallel=tensor_parallel,
         port=port,
         image=image,
+        image_policy=image_policy,
     )
     console.print(f"Template config written to [bold]{path}[/bold]")
+    if engine == "vllm":
+        _warn_on_floating_vllm_image(
+            image or default_image_for_engine(engine, image_policy=image_policy),
+            "Generated config warning",
+        )
 
 
 @app.command()
@@ -155,6 +184,8 @@ def up(
 ) -> None:
     """Create or update a deployment and start the container."""
     config = load_config(config_file)
+    if config.engine == "vllm":
+        _warn_on_floating_vllm_image(config.image or "", "Deployment warning")
     if is_port_in_use(config.port):
         console.print(f"[red]Port {config.port} is already in use[/red]")
         raise typer.Exit(1)
@@ -166,6 +197,18 @@ def up(
             console.print(f"[red]{smoke.label} failed:[/red] {smoke.detail}")
             console.print(
                 "[yellow]Run `miner-cli toolkit verify --smoke-test` or `miner-cli toolkit install` to fix host prerequisites.[/yellow]"
+            )
+            raise typer.Exit(1)
+        console.print(f"Running {config.engine} image startup smoke test...")
+        engine_smoke = engine_container_smoke_test(
+            config.engine,
+            config.image,
+            progress=_progress_log,
+        )
+        if engine_smoke.status != "ok":
+            console.print(f"[red]{engine_smoke.label} failed:[/red] {engine_smoke.detail}")
+            console.print(
+                f"[yellow]The selected image may require a newer NVIDIA driver than this host provides. Pin an older image in `{config_file}` or upgrade the driver, then retry.[/yellow]"
             )
             raise typer.Exit(1)
 

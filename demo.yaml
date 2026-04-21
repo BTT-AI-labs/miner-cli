@@ -1,0 +1,22 @@
+name: demo
+engine: vllm
+model: Qwen/Qwen2.5-7B-Instruct
+image: vllm/vllm-openai:latest
+host: 0.0.0.0
+port: 8000
+tensor_parallel: 1
+gpu_ids: all
+trust_remote_code: true
+dtype: bfloat16
+max_model_len: 32768
+hf_token_env: HF_TOKEN
+hf_cache: /data/huggingface
+shm_size: 16g
+extra_args:
+- --max-num-seqs
+- '16'
+env: {}
+dcgm_exporter: {}
+miner_client: {}
+metrics_collector: {}
+extra_services: {}

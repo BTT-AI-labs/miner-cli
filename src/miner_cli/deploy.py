@@ -42,7 +42,7 @@ def shell_quote(value: str) -> str:
     return "'" + value.replace("'", "'\"'\"'") + "'"
 
 
-def build_launch_command(config: DeploymentConfig) -> str:
+def build_launch_args(config: DeploymentConfig) -> list[str]:
     if config.engine == "sglang":
         args = [
             "python",
@@ -67,15 +67,11 @@ def build_launch_command(config: DeploymentConfig) -> str:
             args.extend(["--api-key", config.api_key])
     else:
         args = [
-            "python",
-            "-m",
-            "vllm.entrypoints.openai.api_server",
+            config.model,
             "--host",
             config.host,
             "--port",
             str(config.port),
-            "--model",
-            config.model,
             "--tensor-parallel-size",
             str(config.tensor_parallel),
         ]
@@ -89,6 +85,11 @@ def build_launch_command(config: DeploymentConfig) -> str:
             args.extend(["--api-key", config.api_key])
 
     args.extend(config.extra_args)
+    return args
+
+
+def build_launch_command(config: DeploymentConfig) -> str:
+    args = build_launch_args(config)
     return " ".join(shell_quote(item) for item in args)
 
 
@@ -301,6 +302,7 @@ def render_compose(config: DeploymentConfig) -> str:
         gpu_ids=config.gpu_ids,
         env=config.env,
         launch_command=build_launch_command(config),
+        launch_args=build_launch_args(config),
         extra_services_yaml=render_extra_services(config),
     )
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from .config import DeploymentConfig, load_config
+from .config import DeploymentConfig, image_uses_floating_latest, load_config
 from .deploy import default_image
 from .doctor import config_checks, gpu_container_smoke_test
 from .preparation import CheckResult, ProgressLogger, run_logged_command
@@ -67,11 +67,8 @@ def _vllm_smoke_test(image: str, progress: ProgressLogger | None = None) -> Chec
             "--rm",
             "--gpus",
             "all",
-            "--entrypoint",
-            "python",
             image,
-            "-c",
-            "import vllm; print('vllm-ready')",
+            "--help",
         ],
         progress=progress,
     )
@@ -81,6 +78,34 @@ def _vllm_smoke_test(image: str, progress: ProgressLogger | None = None) -> Chec
         "ok" if result.returncode == 0 else "fail",
         detail.splitlines()[-1] if detail else f"exit={result.returncode}",
     )
+
+
+def engine_container_smoke_test(
+    engine: str,
+    image: str,
+    progress: ProgressLogger | None = None,
+) -> CheckResult:
+    if engine == "vllm":
+        result = run_logged_command(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--gpus",
+                "all",
+                image,
+                "--help",
+            ],
+            progress=progress,
+        )
+        detail = (result.stdout or result.stderr).strip()
+        return CheckResult(
+            "engine container smoke test",
+            "ok" if result.returncode == 0 else "fail",
+            detail.splitlines()[-1] if detail else f"exit={result.returncode}",
+        )
+
+    return CheckResult("engine container smoke test", "warn", f"no smoke test for engine: {engine}")
 
 
 def prepare_runtime(
@@ -101,6 +126,14 @@ def prepare_runtime(
     if progress is not None:
         progress("Running runtime preflight checks...")
     checks.extend(config_checks(config))
+    if engine == "vllm" and image_uses_floating_latest(config.image or default_image(engine)):
+        checks.append(
+            CheckResult(
+                "runtime image policy",
+                "warn",
+                "floating latest image may drift and require newer NVIDIA drivers; pin image: for reproducible deploys",
+            )
+        )
     checks.append(_ensure_cache_path(Path(config.hf_cache)))
     checks.append(_hf_token_check(config.hf_token_env, require_hf_token))
 
@@ -113,6 +146,9 @@ def prepare_runtime(
         if progress is not None:
             progress("Running GPU container smoke test...")
         checks.append(gpu_container_smoke_test(progress=progress))
+        if progress is not None:
+            progress("Running engine container startup smoke test...")
+        checks.append(engine_container_smoke_test(engine, config.image or default_image(engine), progress=progress))
         if progress is not None:
             progress("Running vLLM import smoke test...")
         checks.append(_vllm_smoke_test(config.image or default_image(engine), progress=progress))

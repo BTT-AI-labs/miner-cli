@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from miner_cli.config import DeploymentConfig, default_image_for_engine
+from miner_cli.config import DeploymentConfig, default_image_for_engine, image_uses_floating_latest
 
 
 def test_from_dict_normalizes_and_validates_string_fields() -> None:
@@ -88,6 +88,15 @@ def test_validate_rejects_empty_runtime_fields() -> None:
 def test_default_image_for_engine() -> None:
     assert default_image_for_engine("sglang") == "lmsysorg/sglang:latest"
     assert default_image_for_engine("vllm") == "vllm/vllm-openai:latest"
+    assert default_image_for_engine("vllm", image_policy="latest") == "vllm/vllm-openai:latest"
 
     with pytest.raises(ValueError, match="Unsupported engine"):
         default_image_for_engine("unknown")
+    with pytest.raises(ValueError, match="Unsupported image policy"):
+        default_image_for_engine("vllm", image_policy="preview")
+
+
+def test_image_uses_floating_latest() -> None:
+    assert image_uses_floating_latest("vllm/vllm-openai:latest") is True
+    assert image_uses_floating_latest("vllm/vllm-openai") is True
+    assert image_uses_floating_latest("vllm/vllm-openai:v0.9.0") is False

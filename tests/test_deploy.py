@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from miner_cli.config import DeploymentConfig
-from miner_cli.deploy import build_launch_command, render_extra_services
+from miner_cli.deploy import build_launch_args, build_launch_command, render_extra_services
 
 
 def test_build_launch_command_for_sglang_includes_expected_flags() -> None:
@@ -24,6 +24,22 @@ def test_build_launch_command_for_sglang_includes_expected_flags() -> None:
     assert "'--context-length' '8192'" in command
     assert "'--api-key' 'secret'" in command
     assert "'--tool-call-parser' 'hermes'" in command
+
+
+def test_build_launch_args_for_vllm_uses_default_entrypoint_style() -> None:
+    config = DeploymentConfig(
+        name="demo",
+        engine="vllm",
+        model="Qwen/Qwen3.5-9B",
+        tensor_parallel=1,
+        max_model_len=32768,
+        extra_args=["--max-num-seqs", "16"],
+    )
+
+    args = build_launch_args(config)
+
+    assert args[:3] == ["Qwen/Qwen3.5-9B", "--host", "0.0.0.0"]
+    assert args[-2:] == ["--max-num-seqs", "16"]
 
 
 def test_render_extra_services_includes_dcgm_and_metrics_collector() -> None:

@@ -8,17 +8,32 @@ import yaml
 
 DEFAULT_DEPLOYMENTS_DIR = Path.home() / ".miner-cli" / "deployments"
 SUPPORTED_ENGINES = frozenset({"sglang", "vllm"})
+SUPPORTED_IMAGE_POLICIES = frozenset({"stable", "latest"})
+STABLE_ENGINE_IMAGES = {
+    "sglang": "lmsysorg/sglang:latest",
+    "vllm": "vllm/vllm-openai:latest",
+}
+LATEST_ENGINE_IMAGES = {
+    "sglang": "lmsysorg/sglang:latest",
+    "vllm": "vllm/vllm-openai:latest",
+}
 
 
-def default_image_for_engine(engine: str) -> str:
-    images = {
-        "sglang": "lmsysorg/sglang:latest",
-        "vllm": "vllm/vllm-openai:latest",
-    }
+def default_image_for_engine(engine: str, image_policy: str = "stable") -> str:
+    if image_policy not in SUPPORTED_IMAGE_POLICIES:
+        raise ValueError(
+            f"Unsupported image policy: {image_policy}. Expected one of: stable, latest"
+        )
+    images = STABLE_ENGINE_IMAGES if image_policy == "stable" else LATEST_ENGINE_IMAGES
     try:
         return images[engine]
     except KeyError as exc:
         raise ValueError(f"Unsupported engine: {engine}") from exc
+
+
+def image_uses_floating_latest(image: str) -> bool:
+    normalized = image.strip()
+    return normalized.endswith(":latest") or ":" not in normalized
 
 
 def _ensure_mapping(value: Any, field_name: str) -> dict[str, Any]:
@@ -161,8 +176,9 @@ def write_template_config(
     tensor_parallel: int = 1,
     port: int = 8000,
     image: str | None = None,
+    image_policy: str = "stable",
 ) -> None:
-    image = default_image_for_engine(engine) if image is None else image
+    image = default_image_for_engine(engine, image_policy=image_policy) if image is None else image
     template = {
         "name": name,
         "engine": engine,

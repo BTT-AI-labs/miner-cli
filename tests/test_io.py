@@ -28,6 +28,21 @@ def test_write_template_config_generates_engine_specific_defaults(tmp_path: Path
     assert raw["tensor_parallel"] == 2
 
 
+def test_write_template_config_supports_latest_image_policy(tmp_path: Path) -> None:
+    config_path = tmp_path / "demo-latest.yaml"
+
+    write_template_config(
+        config_path,
+        name="demo",
+        engine="vllm",
+        model="Qwen/Qwen2.5-7B-Instruct",
+        image_policy="latest",
+    )
+
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert raw["image"] == "vllm/vllm-openai:latest"
+
+
 def test_load_config_rejects_non_mapping_yaml(tmp_path: Path) -> None:
     config_path = tmp_path / "bad.yaml"
     config_path.write_text("- just\n- a\n- list\n", encoding="utf-8")
@@ -59,6 +74,23 @@ def test_render_compose_embeds_launch_command_and_extra_services() -> None:
     assert "hermes" in rendered
 
 
+def test_render_compose_for_vllm_uses_argument_list_command() -> None:
+    config = DeploymentConfig(
+        name="demo",
+        engine="vllm",
+        model="Qwen/Qwen3.5-9B",
+        extra_args=["--max-num-seqs", "16"],
+    )
+
+    rendered = render_compose(config)
+    raw = yaml.safe_load(rendered)
+    service = raw["services"]["demo"]
+
+    assert "entrypoint" not in service
+    assert service["command"][:5] == ["Qwen/Qwen3.5-9B", "--host", "0.0.0.0", "--port", "8000"]
+    assert service["command"][-2:] == ["--max-num-seqs", "16"]
+
+
 def test_write_deployment_files_writes_compose_env_and_copies_source(
     monkeypatch, tmp_path: Path
 ) -> None:
@@ -76,6 +108,7 @@ def test_write_deployment_files_writes_compose_env_and_copies_source(
     paths = write_deployment_files(config, source_config_path=source_path)
 
     assert paths.compose_path.exists()
-    assert "vllm.entrypoints.openai.api_server" in paths.compose_path.read_text(encoding="utf-8")
+    raw = yaml.safe_load(paths.compose_path.read_text(encoding="utf-8"))
+    assert raw["services"]["demo"]["command"][:3] == ["Qwen/Qwen2.5-7B-Instruct", "--host", "0.0.0.0"]
     assert paths.env_path.read_text(encoding="utf-8") == "HF_TOKEN=secret-token\n"
     assert paths.config_path.read_text(encoding="utf-8") == "name: demo\n"

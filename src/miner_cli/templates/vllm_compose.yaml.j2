@@ -18,9 +18,9 @@ services:
       - {{ key }}={{ value }}
 {% endfor %}
     command:
-      - sh
-      - -lc
-      - {{ launch_command | tojson }}
+{% for arg in launch_args %}
+      - {{ arg | tojson }}
+{% endfor %}
 {% if extra_services_yaml %}
 
 {{ extra_services_yaml }}
