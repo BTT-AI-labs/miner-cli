@@ -19,6 +19,34 @@ STATUS_COLOR = {"ok": "green", "warn": "yellow", "fail": "red"}
 ProgressLogger = Callable[[str], None]
 
 
+def _classify_nvidia_host_failure(detail: str) -> str:
+    lowered = detail.lower()
+    if lowered == "not found":
+        return "driver_missing"
+    if "couldn't communicate with the nvidia driver" in lowered:
+        return "driver_not_loaded"
+    if "no devices were found" in lowered or "no devices found" in lowered:
+        return "gpu_not_visible"
+    if "insufficiently permission" in lowered or "permission denied" in lowered:
+        return "permission_or_device_nodes"
+    return "unknown"
+
+
+def _classify_gpu_runtime_failure(detail: str) -> str:
+    lowered = detail.lower()
+    if "driver version is insufficient" in lowered:
+        return "driver_too_old"
+    if "unsatisfied condition: cuda>=" in lowered:
+        return "driver_too_old"
+    if "could not select device driver" in lowered:
+        return "docker_runtime_not_wired"
+    if "nvidia-container-cli" in lowered:
+        return "container_runtime_or_driver"
+    if "manifest for " in lowered and "not found" in lowered:
+        return "image_missing"
+    return "unknown"
+
+
 def remediation_steps(checks: list[CheckResult]) -> list[str]:
     steps: list[str] = []
     for check in checks:
@@ -48,15 +76,30 @@ def remediation_steps(checks: list[CheckResult]) -> list[str]:
         elif check.label == "docker nvidia runtime":
             steps.append("Run `miner-cli toolkit install` to configure Docker's `nvidia` runtime, then rerun `miner-cli toolkit verify --smoke-test`.")
         elif check.label == "nvidia-smi":
-            steps.append(
-                "Install or repair the host NVIDIA driver first, confirm `nvidia-smi` works on the host, then rerun `miner-cli toolkit verify`."
-            )
+            failure_kind = _classify_nvidia_host_failure(check.detail)
+            if failure_kind == "driver_missing":
+                steps.append("Install the host NVIDIA driver first, confirm `nvidia-smi` exists and runs, then rerun `miner-cli toolkit verify`.")
+            elif failure_kind == "driver_not_loaded":
+                steps.append("Repair the host NVIDIA driver/kernel module state, then confirm `nvidia-smi` works on the host before rerunning `miner-cli toolkit verify`.")
+            elif failure_kind == "gpu_not_visible":
+                steps.append("The NVIDIA driver appears present but no GPU is visible. Check PCI visibility, passthrough/cloud GPU attachment, then rerun `miner-cli toolkit verify`.")
+            elif failure_kind == "permission_or_device_nodes":
+                steps.append("Check access to NVIDIA device nodes such as `/dev/nvidia*`, then rerun `miner-cli toolkit verify`.")
+            else:
+                steps.append("Install or repair the host NVIDIA driver first, confirm `nvidia-smi` works on the host, then rerun `miner-cli toolkit verify`.")
         elif check.label == "gpu inventory":
-            steps.append("Check that the GPU is visible on the host with `nvidia-smi`, then rerun `miner-cli toolkit verify`.")
+            if "no gpus detected" in detail:
+                steps.append("The driver is running but no GPU is visible to `nvidia-smi`. Check hardware visibility or VM passthrough, then rerun `miner-cli toolkit verify`.")
+            else:
+                steps.append("Check that the GPU is visible on the host with `nvidia-smi`, then rerun `miner-cli toolkit verify`.")
         elif check.label == "gpu container smoke test":
-            steps.append(
-                "Run `miner-cli toolkit verify --smoke-test`. If host `nvidia-smi` works but the container test fails, repair NVIDIA Container Toolkit or Docker runtime wiring."
-            )
+            failure_kind = _classify_gpu_runtime_failure(check.detail)
+            if failure_kind == "driver_too_old":
+                steps.append("The host NVIDIA driver is older than the CUDA requirement in the container image. Upgrade the host driver or pin an older image, then rerun `miner-cli toolkit verify --smoke-test`.")
+            elif failure_kind == "docker_runtime_not_wired":
+                steps.append("Docker cannot hand GPUs into the container. Run `miner-cli toolkit install` to wire the `nvidia` runtime, then rerun `miner-cli toolkit verify --smoke-test`.")
+            else:
+                steps.append("Run `miner-cli toolkit verify --smoke-test`. If host `nvidia-smi` works but the container test fails, repair NVIDIA Container Toolkit or Docker runtime wiring.")
         elif check.label == "configured port":
             steps.append("Choose a different `port:` in the config or stop the process already using that port, then retry.")
         elif check.label in {"hf cache path", "runtime cache path"}:
@@ -66,9 +109,19 @@ def remediation_steps(checks: list[CheckResult]) -> list[str]:
         elif check.label == "image availability":
             steps.append("Pin a valid image tag and confirm the image exists with `docker manifest inspect <image>` before retrying.")
         elif check.label in {"runtime image pull", "engine container smoke test", "runtime smoke test"}:
-            steps.append(
-                "Run `miner-cli runtime prepare --engine vllm --smoke-test` to isolate image, driver, and container startup issues before `up`."
-            )
+            failure_kind = _classify_gpu_runtime_failure(check.detail)
+            if failure_kind == "driver_too_old":
+                steps.append("The selected image likely needs a newer NVIDIA driver. Upgrade the host driver or pin an older image tag before retrying.")
+            elif failure_kind == "image_missing":
+                steps.append("The selected image tag does not exist. Pin a valid image tag before retrying.")
+            else:
+                steps.append(
+                    "Run `miner-cli runtime prepare --engine vllm --smoke-test` to isolate image, driver, and container startup issues before `up`."
+                )
+        elif check.label == "deployment startup":
+            steps.append("Inspect the container logs and rerun `miner-cli runtime prepare --engine vllm --smoke-test` before retrying `up`.")
+        elif check.label == "service readiness":
+            steps.append("Check container logs and health status, then rerun `miner-cli runtime prepare --engine vllm --smoke-test` if the model runtime still does not come up.")
         elif check.label == "tensor parallel fit":
             steps.append("Lower `tensor_parallel` or move the deployment to a host with enough GPUs.")
         elif check.label == "root disk free":

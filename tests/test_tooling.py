@@ -6,6 +6,7 @@ import subprocess
 from typer.testing import CliRunner
 
 from miner_cli.cli import app
+from miner_cli.config import DeploymentConfig
 from miner_cli.preparation import CheckResult, remediation_steps
 from miner_cli.runtime_prepare import engine_container_smoke_test, prepare_runtime
 from miner_cli.toolkit import (
@@ -261,9 +262,45 @@ def test_remediation_steps_for_driver_and_toolkit_failures() -> None:
 
     steps = remediation_steps(checks)
 
-    assert any("Install or repair the host NVIDIA driver first" in step for step in steps)
+    assert any("Install the host NVIDIA driver first" in step for step in steps)
     assert any("Run `miner-cli toolkit install` to install NVIDIA Container Toolkit" in step for step in steps)
     assert any("configure Docker's `nvidia` runtime" in step for step in steps)
+
+
+def test_remediation_steps_distinguish_missing_driver_from_hidden_gpu() -> None:
+    missing_driver = remediation_steps([CheckResult("nvidia-smi", "fail", "not found")])
+    hidden_gpu = remediation_steps([CheckResult("gpu inventory", "fail", "no GPUs detected")])
+
+    assert any("Install the host NVIDIA driver first" in step for step in missing_driver)
+    assert any("no gpu is visible" in step.lower() for step in hidden_gpu)
+
+
+def test_remediation_steps_distinguish_driver_not_loaded() -> None:
+    steps = remediation_steps(
+        [
+            CheckResult(
+                "nvidia-smi",
+                "fail",
+                "NVIDIA-SMI has failed because it couldn't communicate with the NVIDIA driver.",
+            )
+        ]
+    )
+
+    assert any("kernel module state" in step for step in steps)
+
+
+def test_remediation_steps_distinguish_driver_too_old_for_container() -> None:
+    steps = remediation_steps(
+        [
+            CheckResult(
+                "gpu container smoke test",
+                "fail",
+                "nvidia-container-cli: requirement error: unsatisfied condition: cuda>=12.4",
+            )
+        ]
+    )
+
+    assert any("older than the CUDA requirement" in step for step in steps)
 
 
 def test_doctor_cli_prints_next_steps_for_host_failures(monkeypatch) -> None:
@@ -281,4 +318,54 @@ def test_doctor_cli_prints_next_steps_for_host_failures(monkeypatch) -> None:
     assert result.exit_code == 1
     assert "Next steps" in result.stdout
     assert "Run `miner-cli toolkit install` to install Docker prerequisites" in result.stdout
-    assert "Install or repair the host NVIDIA driver first" in result.stdout
+    assert "Install the host NVIDIA driver first" in result.stdout
+
+
+def test_up_cli_prints_next_steps_for_port_conflict(monkeypatch, tmp_path: Path) -> None:
+    runner = CliRunner()
+    config_path = tmp_path / "demo.yaml"
+    config_path.write_text("name: demo\nengine: vllm\nmodel: demo/model\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "miner_cli.cli.load_config",
+        lambda path: DeploymentConfig(name="demo", engine="vllm", model="demo/model", image="example/image:latest", port=8000),
+    )
+    monkeypatch.setattr("miner_cli.cli.is_port_in_use", lambda port: True)
+
+    result = runner.invoke(app, ["up", "-f", str(config_path)])
+
+    assert result.exit_code == 1
+    assert "Port 8000 is already in use" in result.stdout
+    assert "Next steps" in result.stdout
+    assert "Choose a different `port:` in the config" in result.stdout
+
+
+def test_up_cli_prints_next_steps_for_pull_failure(monkeypatch, tmp_path: Path) -> None:
+    runner = CliRunner()
+    config_path = tmp_path / "demo.yaml"
+    config_path.write_text("name: demo\nengine: vllm\nmodel: demo/model\n", encoding="utf-8")
+    config = DeploymentConfig(name="demo", engine="vllm", model="demo/model", image="example/image:latest", port=8000)
+    monkeypatch.setattr("miner_cli.cli.load_config", lambda path: config)
+    monkeypatch.setattr("miner_cli.cli.is_port_in_use", lambda port: False)
+    monkeypatch.setattr("miner_cli.cli.gpu_container_smoke_test", lambda progress=None: CheckResult("gpu container smoke test", "ok", "ready"))
+    monkeypatch.setattr("miner_cli.cli.engine_container_smoke_test", lambda engine, image, progress=None: CheckResult("engine container smoke test", "ok", "ready"))
+    monkeypatch.setattr("miner_cli.cli.write_deployment_files", lambda cfg, source_config_path=None: object())
+
+    def fake_run_compose(paths, *args, capture_output=False):
+        assert capture_output is True
+        return subprocess.CompletedProcess(
+            args=["docker", "compose", *args],
+            returncode=1,
+            stdout="",
+            stderr="Error response from daemon: manifest for example/image:latest not found",
+        )
+
+    monkeypatch.setattr("miner_cli.cli.run_compose", fake_run_compose)
+
+    result = runner.invoke(app, ["up", "-f", str(config_path)])
+
+    assert result.exit_code == 1
+    assert "Image pull failed" in result.stdout
+    assert "manifest for example/image:latest" in result.stdout
+    assert "not found" in result.stdout
+    assert "Next steps" in result.stdout
+    assert "Run `miner-cli runtime prepare --engine vllm -f" in result.stdout

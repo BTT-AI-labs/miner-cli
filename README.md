@@ -19,14 +19,72 @@ It is intentionally narrow:
 - waits for `/v1/models` to become ready
 - provides basic lifecycle commands for logs, status, stop, restart, and remove
 
-## Install
+## Prerequisites
+
+- Linux x86_64 host
+- NVIDIA GPU visible on the host
+- NVIDIA driver installed on the host
+- Docker available on the host
+- Python 3.10+
+- `uv` if you want to use the recommended project workflow in this README
+
+`miner-cli` does not install the full NVIDIA driver in V1. Driver installation and host GPU visibility remain host-level prerequisites.
+
+## Install `uv`
+
+This README uses `uv sync` and `uv run` as the primary workflow, so install `uv` first if it is not already available.
+
+Recommended standalone installer on macOS/Linux:
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+Alternative installation methods include:
+
+```bash
+pip install uv
+```
+
+After installation, reopen your shell if needed and confirm:
+
+```bash
+uv --version
+```
+
+Official `uv` installation docs: https://docs.astral.sh/uv/getting-started/installation/
+
+## Install Miner CLI
+
+### Option 1: Project workflow with `uv` (recommended)
 
 ```bash
 cd miner-cli
 uv sync
 ```
 
-For local development:
+Run commands from the repo with:
+
+```bash
+uv run miner-cli doctor
+```
+
+### Option 2: Install the CLI into your Python environment with `pip`
+
+The project exposes a console entrypoint in `pyproject.toml`, so you can install it directly:
+
+```bash
+cd miner-cli
+pip install .
+```
+
+Then run:
+
+```bash
+miner-cli doctor
+```
+
+### Local development
 
 ```bash
 uv sync --extra dev
@@ -109,6 +167,117 @@ Stop and remove:
 uv run miner-cli stop qwen35
 uv run miner-cli rm qwen35 --purge-files
 ```
+
+## Recommended Workflow
+
+For a new miner host, use this order:
+
+1. Install or verify local dependencies:
+
+```bash
+uv sync
+```
+
+2. Generate a starter config:
+
+```bash
+uv run miner-cli init qwen35 \
+  --engine vllm \
+  --model Qwen/Qwen2.5-72B-Instruct \
+  --tp 8 \
+  --port 8000
+```
+
+3. Check the host:
+
+```bash
+uv run miner-cli doctor
+```
+
+4. If Docker or GPU container wiring is missing, prepare the host toolkit:
+
+```bash
+uv run miner-cli toolkit install
+uv run miner-cli toolkit verify --smoke-test
+```
+
+5. Prepare the runtime for the selected engine and config:
+
+```bash
+export HF_TOKEN=hf_xxx
+uv run miner-cli runtime prepare --engine vllm -f qwen35.yaml --smoke-test
+```
+
+6. Start the deployment:
+
+```bash
+uv run miner-cli up -f qwen35.yaml
+```
+
+7. Inspect status and logs if needed:
+
+```bash
+uv run miner-cli status qwen35
+uv run miner-cli logs qwen35 -f
+```
+
+In practice, the commands have different responsibilities:
+
+- `doctor`: lightweight host and config checks
+- `toolkit install`: installs Docker-side prerequisites that the tool is allowed to manage
+- `toolkit verify --smoke-test`: validates host GPU container readiness
+- `runtime prepare`: validates image/runtime readiness for one engine and config
+- `up`: deploys the actual workload and performs the final startup checks
+
+## Troubleshooting
+
+When `doctor`, `toolkit verify`, `runtime prepare`, or `up` fails, `miner-cli` prints a `Next steps` block after the main result table or error line. That block is the primary remediation guidance and is intended to tell the operator what to do next instead of only exposing raw command failures.
+
+Common NVIDIA and deployment failure patterns:
+
+- `nvidia-smi: not found`
+  - Meaning: the host NVIDIA driver is not installed or `nvidia-smi` is not on `PATH`
+  - Action: install the host NVIDIA driver first, confirm `nvidia-smi` works on the host, then rerun `uv run miner-cli toolkit verify`
+
+- `NVIDIA-SMI has failed because it couldn't communicate with the NVIDIA driver`
+  - Meaning: the driver package may be present, but the kernel module or driver state is broken
+  - Action: repair the host driver/module state, confirm `nvidia-smi` works, then rerun `uv run miner-cli toolkit verify`
+
+- `gpu inventory: no GPUs detected`
+  - Meaning: the driver is running, but no GPU is visible to the host
+  - Action: check PCI visibility, VM passthrough, or cloud GPU attachment, then rerun `uv run miner-cli toolkit verify`
+
+- `docker nvidia runtime: not configured`
+  - Meaning: Docker is installed, but GPU runtime wiring is incomplete
+  - Action: run `uv run miner-cli toolkit install`, then `uv run miner-cli toolkit verify --smoke-test`
+
+- `gpu container smoke test` fails with messages like `driver version is insufficient` or `cuda>=...`
+  - Meaning: the selected CUDA image requires a newer host NVIDIA driver
+  - Action: upgrade the host driver or pin an older runtime image, then rerun `uv run miner-cli toolkit verify --smoke-test`
+
+- `engine container smoke test` or `runtime smoke test` fails
+  - Meaning: the image can be pulled, but the engine container still cannot start correctly with GPU access
+  - Action: run `uv run miner-cli runtime prepare --engine vllm -f qwen35.yaml --smoke-test`
+
+- `Image pull failed`
+  - Meaning: the configured image tag may not exist, registry access may be broken, or authentication may be missing
+  - Action: verify the configured image tag, confirm network access, and rerun `uv run miner-cli runtime prepare --engine vllm -f qwen35.yaml`
+
+- `Container startup failed`
+  - Meaning: Compose created the deployment, but the workload container could not boot successfully
+  - Action: inspect logs with `uv run miner-cli logs <deployment-name> -f`, then rerun `uv run miner-cli runtime prepare --engine vllm -f <config> --smoke-test`
+
+- readiness timeout
+  - Meaning: the container is running, but `/v1/models` never became healthy in time
+  - Action: inspect logs, verify model download progress and GPU memory fit, then rerun `uv run miner-cli runtime prepare --engine vllm -f <config> --smoke-test`
+
+Operational guidance:
+
+- `miner-cli` does not install the full NVIDIA driver in V1. The host driver remains a manual prerequisite.
+- `toolkit install` is for Docker, permissions, NVIDIA Container Toolkit, and Docker runtime wiring.
+- If host `nvidia-smi` works but the container smoke test fails, the problem is usually NVIDIA Container Toolkit or Docker runtime wiring, not the basic GPU hardware.
+- If the container smoke test passes but the engine smoke test fails, the problem is usually image compatibility, CUDA/driver mismatch, or engine startup behavior.
+- If you want more reproducible behavior, pin `image:` in your config instead of relying on floating `latest` tags.
 
 ## Example Config
 

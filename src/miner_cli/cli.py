@@ -23,7 +23,7 @@ from .deploy import (
     write_deployment_files,
 )
 from .doctor import config_checks, gpu_container_smoke_test, host_checks
-from .preparation import CheckResult, print_results
+from .preparation import CheckResult, print_results, remediation_steps
 from .runtime_prepare import SUPPORTED_RUNTIME_ENGINES, engine_container_smoke_test, prepare_runtime
 from .toolkit import install_toolkit, verify_toolkit_host
 
@@ -37,8 +37,34 @@ def _print_results(title: str, checks: list[CheckResult]) -> None:
     print_results(console, title, checks)
 
 
+def _print_next_steps(checks: list[CheckResult], extra_steps: list[str] | None = None) -> None:
+    steps = remediation_steps(checks)
+    for extra_step in extra_steps or []:
+        if extra_step not in steps:
+            steps.append(extra_step)
+    if steps:
+        console.print("[bold]Next steps[/bold]")
+        for step in steps:
+            console.print(f"- {step}")
+
+
 def _progress_log(message: str) -> None:
     console.print(f"[cyan]{message}[/cyan]")
+
+
+def _summarize_subprocess_failure(result) -> str:
+    lines = [
+        line.strip()
+        for line in ((result.stdout or "").splitlines() + (result.stderr or "").splitlines())
+        if line.strip()
+    ]
+    if not lines:
+        return f"exit={result.returncode}"
+    for line in reversed(lines):
+        lowered = line.lower()
+        if any(marker in lowered for marker in ("error", "failed", "denied", "not found", "timeout")):
+            return line
+    return lines[-1]
 
 
 def _warn_on_floating_vllm_image(image: str, context: str) -> None:
@@ -188,6 +214,7 @@ def up(
         _warn_on_floating_vllm_image(config.image or "", "Deployment warning")
     if is_port_in_use(config.port):
         console.print(f"[red]Port {config.port} is already in use[/red]")
+        _print_next_steps([CheckResult("configured port", "fail", f"port {config.port} is already in use")])
         raise typer.Exit(1)
 
     if not skip_smoke_test:
@@ -195,9 +222,7 @@ def up(
         smoke = gpu_container_smoke_test(progress=_progress_log)
         if smoke.status != "ok":
             console.print(f"[red]{smoke.label} failed:[/red] {smoke.detail}")
-            console.print(
-                "[yellow]Run `miner-cli toolkit verify --smoke-test` or `miner-cli toolkit install` to fix host prerequisites.[/yellow]"
-            )
+            _print_next_steps([smoke])
             raise typer.Exit(1)
         console.print(f"Running {config.engine} image startup smoke test...")
         engine_smoke = engine_container_smoke_test(
@@ -207,25 +232,40 @@ def up(
         )
         if engine_smoke.status != "ok":
             console.print(f"[red]{engine_smoke.label} failed:[/red] {engine_smoke.detail}")
-            console.print(
-                f"[yellow]The selected image may require a newer NVIDIA driver than this host provides. Pin an older image in `{config_file}` or upgrade the driver, then retry.[/yellow]"
+            _print_next_steps(
+                [engine_smoke],
+                [
+                    f"Pin an older image in `{config_file}` or upgrade the host NVIDIA driver, then retry.",
+                ],
             )
             raise typer.Exit(1)
 
     paths = write_deployment_files(config, source_config_path=config_file)
 
     if pull:
-        result = run_compose(paths, "pull")
+        result = run_compose(paths, "pull", capture_output=True)
         if result.returncode != 0:
-            console.print(
-                f"[yellow]Image pull failed. Run `miner-cli runtime prepare --engine {config.engine} -f {config_file}` to verify runtime prerequisites.[/yellow]"
+            detail = _summarize_subprocess_failure(result)
+            console.print(f"[red]Image pull failed:[/red] {detail}")
+            _print_next_steps(
+                [CheckResult("runtime image pull", "fail", detail)],
+                [
+                    f"Run `miner-cli runtime prepare --engine {config.engine} -f {config_file}` to verify runtime prerequisites for this config.",
+                ],
             )
             raise typer.Exit(result.returncode)
 
-    result = run_compose(paths, "up", "-d")
+    result = run_compose(paths, "up", "-d", capture_output=True)
     if result.returncode != 0:
-        console.print(
-            f"[yellow]Container startup failed. Run `miner-cli runtime prepare --engine {config.engine} -f {config_file}` or `miner-cli toolkit verify` for remediation.[/yellow]"
+        detail = _summarize_subprocess_failure(result)
+        console.print(f"[red]Container startup failed:[/red] {detail}")
+        _print_next_steps(
+            [CheckResult("deployment startup", "fail", detail)],
+            [
+                f"Run `miner-cli runtime prepare --engine {config.engine} -f {config_file}` to verify runtime prerequisites for this config.",
+                "Run `miner-cli toolkit verify --smoke-test` if the failure may come from host GPU runtime wiring.",
+                f"Inspect runtime logs with `miner-cli logs {config.name}` before retrying.",
+            ],
         )
         raise typer.Exit(result.returncode)
 
@@ -235,8 +275,12 @@ def up(
             wait_for_ready(config, progress=_progress_log)
         except TimeoutError as exc:
             console.print(f"[red]{exc}[/red]")
-            console.print(
-                f"[yellow]If the runtime is not ready, run `miner-cli runtime prepare --engine {config.engine} -f {config_file}` before retrying.[/yellow]"
+            _print_next_steps(
+                [CheckResult("service readiness", "fail", str(exc))],
+                [
+                    f"Run `miner-cli runtime prepare --engine {config.engine} -f {config_file}` before retrying.",
+                    f"Inspect runtime logs with `miner-cli logs {config.name}` while the container is starting.",
+                ],
             )
             raise typer.Exit(1) from exc
 
