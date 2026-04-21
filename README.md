@@ -254,6 +254,7 @@ Use `extra_services` only for unrelated sidecars that should not be coupled to t
 - `toolkit install` uses distro-family backends for `debian`, `rhel`, and `arch` style systems and performs privileged host changes through installer scripts.
 - On unsupported distributions, `toolkit install` stops early and prints manual installation guidance instead of guessing.
 - `toolkit verify` and `runtime prepare` are the recommended preparation steps before `up` when a host is not already ready.
+- Failing `doctor`, `toolkit verify`, and `runtime prepare` runs now print a `Next steps` block that maps each failed check to the most relevant remediation command or manual host action.
 - The default image names are placeholders that should be validated against the images you want to support in production.
 - `miner-cli` should only default to tags that are confirmed to exist upstream. Until a verified stable tag policy is maintained in-repo, the generated `vllm` image remains the official upstream default.
 - If you need stricter reproducibility, set `image:` explicitly in your config instead of relying on the generated default.

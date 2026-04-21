@@ -6,7 +6,7 @@ import subprocess
 from typer.testing import CliRunner
 
 from miner_cli.cli import app
-from miner_cli.preparation import CheckResult
+from miner_cli.preparation import CheckResult, remediation_steps
 from miner_cli.runtime_prepare import engine_container_smoke_test, prepare_runtime
 from miner_cli.toolkit import (
     HostProfile,
@@ -250,3 +250,35 @@ def test_post_install_guidance_reports_session_refresh(monkeypatch) -> None:
             "docker group membership may need a new shell; run `newgrp docker` or open a new shell session",
         )
     ]
+
+
+def test_remediation_steps_for_driver_and_toolkit_failures() -> None:
+    checks = [
+        CheckResult("nvidia-smi", "fail", "not found"),
+        CheckResult("nvidia container toolkit", "fail", "missing"),
+        CheckResult("docker nvidia runtime", "fail", "not configured"),
+    ]
+
+    steps = remediation_steps(checks)
+
+    assert any("Install or repair the host NVIDIA driver first" in step for step in steps)
+    assert any("Run `miner-cli toolkit install` to install NVIDIA Container Toolkit" in step for step in steps)
+    assert any("configure Docker's `nvidia` runtime" in step for step in steps)
+
+
+def test_doctor_cli_prints_next_steps_for_host_failures(monkeypatch) -> None:
+    runner = CliRunner()
+    monkeypatch.setattr(
+        "miner_cli.cli.host_checks",
+        lambda: [
+            CheckResult("docker cli", "fail", "not found"),
+            CheckResult("nvidia-smi", "fail", "not found"),
+        ],
+    )
+
+    result = runner.invoke(app, ["doctor"])
+
+    assert result.exit_code == 1
+    assert "Next steps" in result.stdout
+    assert "Run `miner-cli toolkit install` to install Docker prerequisites" in result.stdout
+    assert "Install or repair the host NVIDIA driver first" in result.stdout
