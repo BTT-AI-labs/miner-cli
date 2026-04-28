@@ -21,6 +21,7 @@ build/
 dist/
 *.egg-info/
 .eggs/
+*.spec
 
 # Local tool state
 *.log
