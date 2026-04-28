@@ -87,7 +87,6 @@ class DeploymentConfig:
     env: dict[str, str] = field(default_factory=dict)
     dcgm_exporter: dict[str, Any] = field(default_factory=dict)
     miner_client: dict[str, Any] = field(default_factory=dict)
-    metrics_collector: dict[str, Any] = field(default_factory=dict)
     extra_services: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -96,7 +95,6 @@ class DeploymentConfig:
         extra_args = _ensure_string_list(raw.get("extra_args"), "extra_args")
         dcgm_exporter = _ensure_mapping(raw.get("dcgm_exporter"), "dcgm_exporter")
         miner_client = _load_miner_client_config(raw)
-        metrics_collector = _ensure_mapping(raw.get("metrics_collector"), "metrics_collector")
         extra_services = _ensure_mapping(raw.get("extra_services"), "extra_services")
         cfg = cls(
             name=raw["name"],
@@ -118,7 +116,6 @@ class DeploymentConfig:
             env=env,
             dcgm_exporter=dcgm_exporter,
             miner_client=miner_client,
-            metrics_collector=metrics_collector,
             extra_services=extra_services,
         )
         cfg.validate()
@@ -151,7 +148,6 @@ class DeploymentConfig:
         _ensure_string_map(self.env, "env")
         _ensure_mapping(self.dcgm_exporter, "dcgm_exporter")
         _ensure_mapping(self.miner_client, "miner_client")
-        _ensure_mapping(self.metrics_collector, "metrics_collector")
         extra_services = _ensure_mapping(self.extra_services, "extra_services")
         for service_name, service in extra_services.items():
             if not isinstance(service_name, str):
@@ -205,7 +201,6 @@ def write_template_config(
         "env": {},
         "dcgm_exporter": {},
         "miner_client": {},
-        "metrics_collector": {},
         "extra_services": {},
     }
     path.parent.mkdir(parents=True, exist_ok=True)

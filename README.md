@@ -14,7 +14,7 @@ It is intentionally narrow:
 - checks whether the machine is ready for GPU containers
 - generates a starter YAML config
 - renders a Docker Compose deployment
-- starts `sglang` or `vllm` containers
+- starts `vllm` containers
 - runs a GPU container smoke test before deployment by default
 - waits for `/v1/models` to become ready
 - provides basic lifecycle commands for logs, status, stop, restart, and remove
@@ -223,7 +223,7 @@ uv run miner-cli logs qwen35 -f
 
 In practice, the commands have different responsibilities:
 
-- `doctor`: lightweight host and config checks
+- `doctor`: lightweight host checks, and config checks if you specified config file by `-f`
 - `toolkit install`: installs Docker-side prerequisites that the tool is allowed to manage
 - `toolkit verify --smoke-test`: validates host GPU container readiness
 - `runtime prepare`: validates image/runtime readiness for one engine and config
@@ -294,7 +294,6 @@ Important fields:
 - `extra_args`: extra engine-specific CLI arguments
 - `dcgm_exporter`: optional config block to add a DCGM metrics exporter service
 - `miner_client`: optional config block to add the `miner-client` sidecar
-- `metrics_collector`: optional config block to add a dedicated collector service built from your own image
 - `extra_services`: arbitrary additional Docker Compose services appended under `services:`
 
 Example:
@@ -302,15 +301,6 @@ Example:
 ```yaml
 dcgm_exporter:
   enabled: true
-
-metrics_collector:
-  enabled: true
-  image: your-registry/metrics-collector:latest
-  listen_port: 8080
-  host_port: 18080
-  upstream_http_url: http://your-http-service.internal:9000/api
-  environment:
-    SCRAPE_INTERVAL: 15s
 ```
 
 For the `miner-client` sidecar, use `miner_client`:
@@ -379,40 +369,6 @@ Backward compatibility:
 
 - `custom_service` is still accepted as a legacy alias for `miner_client`
 - do not set both fields in the same config
-
-When `metrics_collector.enabled` is `true`, `miner-cli` generates a collector service in the same Docker Compose network as the inference container and `dcgm-exporter`. The collector gets these environment variables by default:
-
-- `INFERENCE_METRICS_URL=http://<deployment-name>:<port>/metrics`
-- `DCGM_EXPORTER_URL=http://dcgm-exporter:9400/metrics`
-- `MODELDOCK_DEPLOYMENT_NAME=<deployment-name>`
-- `MODELDOCK_ENGINE=<engine>`
-- `COLLECTOR_HTTP_HOST=0.0.0.0`
-- `COLLECTOR_HTTP_PORT=<listen_port>`
-
-If `metrics_collector.upstream_http_url` is set, `miner-cli` also injects:
-
-- `UPSTREAM_HTTP_URL=<configured-url>`
-
-The collector exposes its own HTTP port inside the Compose network automatically. If you set `metrics_collector.host_port`, `miner-cli` also publishes it on the host as `<host_port>:<listen_port>`.
-
-You can override the generated defaults with:
-
-- `metrics_collector.service_name`
-- `metrics_collector.container_name`
-- `metrics_collector.inference_metrics_path`
-- `metrics_collector.dcgm_metrics_path`
-- `metrics_collector.listen_host`
-- `metrics_collector.listen_port`
-- `metrics_collector.host_port`
-- `metrics_collector.upstream_http_url`
-- `metrics_collector.environment`
-- `metrics_collector.command`
-- `metrics_collector.entrypoint`
-- `metrics_collector.volumes`
-- `metrics_collector.ports`
-- `metrics_collector.labels`
-- `metrics_collector.depends_on`
-- `metrics_collector.healthcheck`
 
 Use `extra_services` only for unrelated sidecars that should not be coupled to the inference metrics flow.
 

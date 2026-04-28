@@ -14,6 +14,7 @@ from .config import (
     image_uses_floating_latest,
     load_config,
     write_template_config,
+    DeploymentConfig,
 )
 from .deploy import (
     deployment_paths,
@@ -91,7 +92,7 @@ def doctor(
     """Check whether the host is ready for Docker-based model deployment."""
     checks: list[CheckResult] = host_checks()
     if config_file is not None:
-        config = load_config(config_file)
+        config: DeploymentConfig = load_config(config_file)
         checks.extend(config_checks(config))
 
     _print_results("Miner CLI Doctor", checks)
@@ -212,6 +213,7 @@ def up(
     config = load_config(config_file)
     if config.engine == "vllm":
         _warn_on_floating_vllm_image(config.image or "", "Deployment warning")
+    # check whether the port is in use
     if is_port_in_use(config.port):
         console.print(f"[red]Port {config.port} is already in use[/red]")
         _print_next_steps([CheckResult("configured port", "fail", f"port {config.port} is already in use")])
@@ -227,7 +229,7 @@ def up(
         console.print(f"Running {config.engine} image startup smoke test...")
         engine_smoke = engine_container_smoke_test(
             config.engine,
-            config.image,
+            str(config.image),
             progress=_progress_log,
         )
         if engine_smoke.status != "ok":
@@ -240,8 +242,10 @@ def up(
             )
             raise typer.Exit(1)
 
+    # wirte deployment file
     paths = write_deployment_files(config, source_config_path=config_file)
 
+    # pull all the images in the docker compose file
     if pull:
         result = run_compose(paths, "pull", capture_output=True)
         if result.returncode != 0:
@@ -255,6 +259,7 @@ def up(
             )
             raise typer.Exit(result.returncode)
 
+    # start the deployment: docker compose up -d 
     result = run_compose(paths, "up", "-d", capture_output=True)
     if result.returncode != 0:
         detail = _summarize_subprocess_failure(result)
@@ -269,6 +274,7 @@ def up(
         )
         raise typer.Exit(result.returncode)
 
+    # wait until llm started
     if wait:
         console.print("Waiting for service readiness...")
         try:

@@ -42,27 +42,6 @@ def test_build_launch_args_for_vllm_uses_default_entrypoint_style() -> None:
     assert args[-2:] == ["--max-num-seqs", "16"]
 
 
-def test_render_extra_services_includes_dcgm_and_metrics_collector() -> None:
-    config = DeploymentConfig(
-        name="demo",
-        engine="sglang",
-        model="Qwen/Qwen2.5-7B-Instruct",
-        dcgm_exporter={"enabled": True},
-        metrics_collector={
-            "enabled": True,
-            "image": "example/collector:latest",
-            "listen_port": 9090,
-            "host_port": 19090,
-        },
-    )
-
-    rendered = render_extra_services(config)
-
-    assert "dcgm-exporter:" in rendered
-    assert "metrics-collector:" in rendered
-    assert "INFERENCE_METRICS_URL: http://demo:8000/metrics" in rendered
-    assert "19090:9090" in rendered
-
 
 def test_render_extra_services_includes_miner_client() -> None:
     config = DeploymentConfig(
@@ -102,16 +81,4 @@ def test_render_extra_services_requires_miner_client_image() -> None:
     )
 
     with pytest.raises(ValueError, match="miner_client.image is required"):
-        render_extra_services(config)
-
-
-def test_render_extra_services_requires_collector_image() -> None:
-    config = DeploymentConfig(
-        name="demo",
-        engine="vllm",
-        model="Qwen/Qwen2.5-7B-Instruct",
-        metrics_collector={"enabled": True},
-    )
-
-    with pytest.raises(ValueError, match="metrics_collector.image is required"):
         render_extra_services(config)

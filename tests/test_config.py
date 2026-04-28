@@ -15,7 +15,6 @@ def test_from_dict_normalizes_and_validates_string_fields() -> None:
             "env": {"HF_HUB_ENABLE_HF_TRANSFER": "1"},
             "dcgm_exporter": {"enabled": True},
             "miner_client": {"enabled": True, "image": "example/miner-client:latest"},
-            "metrics_collector": {"enabled": False},
             "extra_services": {"redis": {"image": "redis:7"}},
         }
     )

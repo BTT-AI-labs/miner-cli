@@ -198,67 +198,6 @@ def _build_miner_client_service(config: DeploymentConfig) -> tuple[str, dict[str
 
     return service_name, service
 
-
-def _build_metrics_collector_service(
-    config: DeploymentConfig,
-) -> tuple[str, dict[str, object]] | None:
-    settings = config.metrics_collector
-    if not settings.get("enabled"):
-        return None
-
-    image = settings.get("image")
-    if not image:
-        raise ValueError("metrics_collector.image is required when metrics_collector.enabled=true")
-
-    service_name = str(settings.get("service_name", "metrics-collector"))
-    inference_metrics_path = str(settings.get("inference_metrics_path", "/metrics"))
-    dcgm_metrics_path = str(settings.get("dcgm_metrics_path", "/metrics"))
-    listen_host = str(settings.get("listen_host", "0.0.0.0"))
-    listen_port = int(settings.get("listen_port", 8080))
-    environment = dict(settings.get("environment", {}))
-    environment.setdefault(
-        "INFERENCE_METRICS_URL",
-        f"http://{config.name}:{config.port}{inference_metrics_path}",
-    )
-    environment.setdefault(
-        "DCGM_EXPORTER_URL",
-        f"http://dcgm-exporter:9400{dcgm_metrics_path}",
-    )
-    environment.setdefault("MODELDOCK_DEPLOYMENT_NAME", config.name)
-    environment.setdefault("MODELDOCK_ENGINE", config.engine)
-    environment.setdefault("COLLECTOR_HTTP_HOST", listen_host)
-    environment.setdefault("COLLECTOR_HTTP_PORT", str(listen_port))
-    upstream_http_url = settings.get("upstream_http_url")
-    if upstream_http_url:
-        environment.setdefault("UPSTREAM_HTTP_URL", str(upstream_http_url))
-
-    depends_on = [config.name]
-    if config.dcgm_exporter.get("enabled"):
-        depends_on.append("dcgm-exporter")
-    extra_depends_on = settings.get("depends_on", [])
-    if extra_depends_on:
-        depends_on.extend(str(item) for item in extra_depends_on)
-
-    service: dict[str, object] = {
-        "image": image,
-        "container_name": settings.get("container_name", f"{config.name}-{service_name}"),
-        "restart": settings.get("restart", "unless-stopped"),
-        "depends_on": depends_on,
-        "environment": environment,
-        "expose": [str(listen_port)],
-    }
-
-    publish_port = settings.get("host_port")
-    if publish_port is not None and "ports" not in settings:
-        service["ports"] = [f"{publish_port}:{listen_port}"]
-
-    for key in ("ports", "volumes", "command", "entrypoint", "labels", "gpus", "healthcheck"):
-        if key in settings:
-            service[key] = settings[key]
-
-    return service_name, service
-
-
 def render_extra_services(config: DeploymentConfig) -> str:
     blocks: list[str] = []
 
@@ -270,12 +209,6 @@ def render_extra_services(config: DeploymentConfig) -> str:
     if miner_client is not None:
         service_name, service = miner_client
         blocks.append(_render_service_block(service_name, service))
-
-    collector_service = _build_metrics_collector_service(config)
-    if collector_service is not None:
-        service_name, service = collector_service
-        blocks.append(_render_service_block(service_name, service))
-
     for service_name, service in config.extra_services.items():
         if not isinstance(service, dict):
             raise ValueError(f"extra_services.{service_name} must be a mapping")
@@ -313,15 +246,18 @@ def write_deployment_files(
     paths = deployment_paths(config.name)
     paths.root.mkdir(parents=True, exist_ok=True)
 
+    # docker compose file
     compose = render_compose(config)
     paths.compose_path.write_text(compose, encoding="utf-8")
 
+    # read HF_TOKEN var from local env, and write into .env file
     hf_token = os.getenv(config.hf_token_env, "")
     env_lines = [
         f"{config.hf_token_env}={hf_token}",
     ]
     paths.env_path.write_text("\n".join(env_lines) + "\n", encoding="utf-8")
 
+    # copy config file into target dir
     if source_config_path:
         shutil.copy2(source_config_path, paths.config_path)
 
