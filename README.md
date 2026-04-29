@@ -301,6 +301,7 @@ Example:
 ```yaml
 dcgm_exporter:
   enabled: true
+  gpus: all
 ```
 
 For the `miner-client` sidecar, use `miner_client`:
