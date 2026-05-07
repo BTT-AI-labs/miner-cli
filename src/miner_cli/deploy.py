@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
 
+from typing import Any
+
 import yaml
 from jinja2 import Template
 
@@ -130,47 +132,40 @@ def _build_dcgm_exporter_service(config: DeploymentConfig) -> dict[str, object] 
     return service
 
 
+def _validate_miner_client_cfg(cfg: dict[str, Any]):
+    if not cfg.get("image"):
+        raise ValueError("miner_client.image is required when miner_client.enabled=true")
+    if not cfg.get("public_ip"):
+        raise ValueError("miner_client.public_ip is required when miner_client.enabled=true")
+
+
 def _build_miner_client_service(config: DeploymentConfig) -> tuple[str, dict[str, object]] | None:
     settings = config.miner_client
     if not settings.get("enabled"):
         return None
 
+    _validate_miner_client_cfg(settings)
     image = settings.get("image")
-    if not image:
-        raise ValueError("miner_client.image is required when miner_client.enabled=true")
 
     service_name = str(settings.get("service_name", "miner-client"))
     listen_host = str(settings.get("listen_host", "0.0.0.0"))
     listen_port = int(settings.get("listen_port", 8080))
     inference_base_url = f"http://{config.name}:{config.port}"
-    inference_metrics_path = str(settings.get("inference_metrics_path", "/metrics"))
-    openai_base_path = str(settings.get("openai_base_path", "/v1"))
     dcgm_metrics_path = str(settings.get("dcgm_metrics_path", "/metrics"))
+
     environment = dict(settings.get("environment", {}))
-    environment.setdefault("MODELDOCK_DEPLOYMENT_NAME", config.name)
-    environment.setdefault("MODELDOCK_ENGINE", config.engine)
-    environment.setdefault("MODELDOCK_INFERENCE_BASE_URL", inference_base_url)
-    environment.setdefault("MODELDOCK_OPENAI_BASE_URL", f"{inference_base_url}{openai_base_path}")
-    environment.setdefault(
-        "MODELDOCK_INFERENCE_METRICS_URL",
-        f"{inference_base_url}{inference_metrics_path}",
-    )
     environment.setdefault("MINER_HTTP_HOST", listen_host)
     environment.setdefault("MINER_HTTP_PORT", str(listen_port))
+    environment.setdefault("MINER_PUBLIC_IP", settings.get("public_ip"))
+    environment.setdefault("MINER_RUNTIME_TYPE", config.engine)
+
+    environment.setdefault("MODELDOCK_DEPLOYMENT_NAME", config.name)
     environment.setdefault("MINER_VLLM_BASE_URL", inference_base_url)
     if config.dcgm_exporter.get("enabled"):
-        environment.setdefault(
-            "MODELDOCK_DCGM_EXPORTER_URL",
-            f"http://dcgm-exporter:9400{dcgm_metrics_path}",
-        )
         environment.setdefault(
             "MINER_DCGM_METRICS_URL",
             f"http://dcgm-exporter:9400{dcgm_metrics_path}",
         )
-
-    upstream_http_url = settings.get("upstream_http_url")
-    if upstream_http_url:
-        environment.setdefault("UPSTREAM_HTTP_URL", str(upstream_http_url))
 
     depends_on = [config.name]
     if config.dcgm_exporter.get("enabled"):
@@ -197,6 +192,7 @@ def _build_miner_client_service(config: DeploymentConfig) -> tuple[str, dict[str
             service[key] = settings[key]
 
     return service_name, service
+
 
 def render_extra_services(config: DeploymentConfig) -> str:
     blocks: list[str] = []

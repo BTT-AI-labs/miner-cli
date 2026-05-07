@@ -276,7 +276,7 @@ Operational guidance:
 - `miner-cli` does not install the full NVIDIA driver in V1. The host driver remains a manual prerequisite.
 - `toolkit install` is for Docker, permissions, NVIDIA Container Toolkit, and Docker runtime wiring.
 - If host `nvidia-smi` works but the container smoke test fails, the problem is usually NVIDIA Container Toolkit or Docker runtime wiring, not the basic GPU hardware.
-- If the container smoke test passes but the engine smoke test fails, the problem is usually image compatibility, CUDA/driver mismatch, or engine startup behavior.
+- #### If the container smoke test passes but the engine smoke test fails, the problem is usually image compatibility, CUDA/driver mismatch, or engine startup behavior.
 - If you want more reproducible behavior, pin `image:` in your config instead of relying on floating `latest` tags.
 
 ## Example Config
@@ -285,7 +285,7 @@ See [examples/qwen72b_sglang.yaml](examples/qwen72b_sglang.yaml).
 
 Important fields:
 
-- `engine`: `sglang` or `vllm`
+- `engine`: `sglang` or `vllm`. Only vllm supported right now.
 - `model`: Hugging Face model id
 - `image`: Docker image to run
 - `tensor_parallel`: number of GPUs to shard across
@@ -298,6 +298,7 @@ Important fields:
 
 Example:
 
+For the `dcgm-exporter` sidecar, use `dcgm-exporter`. It exposes an HTTP service on port `9400` with a `/metrics` endpoint for `Prometheus` collection.
 ```yaml
 dcgm_exporter:
   enabled: true
@@ -312,7 +313,6 @@ miner_client:
   image: your-registry/miner:latest
   listen_port: 7070
   host_port: 17070
-  upstream_http_url: http://your-http-service.internal:9000/api
   environment:
     LOG_LEVEL: info
     MAIN_API_BASE_URL: https://main-api.example.com
@@ -323,10 +323,8 @@ miner_client:
 When `miner_client.enabled` is `true`, `miner-cli` generates a service in the same Docker Compose network and injects these environment variables by default:
 
 - `MODELDOCK_DEPLOYMENT_NAME=<deployment-name>`
-- `MODELDOCK_ENGINE=<engine>`
-- `MODELDOCK_INFERENCE_BASE_URL=http://<deployment-name>:<port>`
-- `MODELDOCK_OPENAI_BASE_URL=http://<deployment-name>:<port>/v1`
-- `MODELDOCK_INFERENCE_METRICS_URL=http://<deployment-name>:<port>/metrics`
+
+- `MINER_RUNTIME_TYPE=<engine>`
 - `MINER_HTTP_HOST=0.0.0.0`
 - `MINER_HTTP_PORT=<listen_port>`
 - `MINER_VLLM_BASE_URL=http://<deployment-name>:<port>`
@@ -335,10 +333,6 @@ If `dcgm_exporter.enabled` is also `true`, `miner-cli` also injects:
 
 - `MODELDOCK_DCGM_EXPORTER_URL=http://dcgm-exporter:9400/metrics`
 - `MINER_DCGM_METRICS_URL=http://dcgm-exporter:9400/metrics`
-
-If `miner_client.upstream_http_url` is set, `miner-cli` also injects:
-
-- `UPSTREAM_HTTP_URL=<configured-url>`
 
 For the `miner-client` project in this repo, you should usually provide these additional variables under `miner_client.environment`:
 
@@ -353,10 +347,7 @@ You can override the generated defaults with:
 - `miner_client.listen_host`
 - `miner_client.listen_port`
 - `miner_client.host_port`
-- `miner_client.inference_metrics_path`
-- `miner_client.openai_base_path`
 - `miner_client.dcgm_metrics_path`
-- `miner_client.upstream_http_url`
 - `miner_client.environment`
 - `miner_client.command`
 - `miner_client.entrypoint`
@@ -381,7 +372,6 @@ Use `extra_services` only for unrelated sidecars that should not be coupled to t
 - On unsupported distributions, `toolkit install` stops early and prints manual installation guidance instead of guessing.
 - `toolkit verify` and `runtime prepare` are the recommended preparation steps before `up` when a host is not already ready.
 - Failing `doctor`, `toolkit verify`, and `runtime prepare` runs now print a `Next steps` block that maps each failed check to the most relevant remediation command or manual host action.
-- The default image names are placeholders that should be validated against the images you want to support in production.
 - `miner-cli` should only default to tags that are confirmed to exist upstream. Until a verified stable tag policy is maintained in-repo, the generated `vllm` image remains the official upstream default.
 - If you need stricter reproducibility, set `image:` explicitly in your config instead of relying on the generated default.
 - Deployment files are rendered into `~/.miner-cli/deployments/<name>/`.
