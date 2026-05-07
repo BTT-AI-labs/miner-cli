@@ -311,8 +311,6 @@ For the `miner-client` sidecar, use `miner_client`:
 miner_client:
   enabled: true
   image: your-registry/miner:latest
-  listen_port: 7070
-  host_port: 17070
   environment:
     LOG_LEVEL: info
     MAIN_API_BASE_URL: https://main-api.example.com
@@ -331,7 +329,6 @@ When `miner_client.enabled` is `true`, `miner-cli` generates a service in the sa
 
 If `dcgm_exporter.enabled` is also `true`, `miner-cli` also injects:
 
-- `MODELDOCK_DCGM_EXPORTER_URL=http://dcgm-exporter:9400/metrics`
 - `MINER_DCGM_METRICS_URL=http://dcgm-exporter:9400/metrics`
 
 For the `miner-client` project in this repo, you should usually provide these additional variables under `miner_client.environment`:

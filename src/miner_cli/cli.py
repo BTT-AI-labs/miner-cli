@@ -10,11 +10,11 @@ from rich.table import Table
 from .config import (
     DEFAULT_DEPLOYMENTS_DIR,
     SUPPORTED_IMAGE_POLICIES,
+    DeploymentConfig,
     default_image_for_engine,
     image_uses_floating_latest,
     load_config,
     write_template_config,
-    DeploymentConfig,
 )
 from .deploy import (
     deployment_paths,

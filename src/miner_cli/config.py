@@ -200,7 +200,21 @@ def write_template_config(
         ],
         "env": {},
         "dcgm_exporter": {},
-        "miner_client": {},
+        "miner_client": {
+            "enabled": False,
+            "image": "your-registry/miner:latest",
+            "listen_host": "127.0.0.1",
+            "listen_port": 8080,
+            "public_ip": "your public ip",
+            "environment": {
+                "LOG_LEVEL": "info",
+                "MAIN_API_BASE_URL": "https://main-api.example.com",
+                "MINER_TOKEN": "replace-me",
+                "MINER_TARGET_MODEL": model,
+                "MINER_HOME": "/root/.miner",
+                "MINER_RUNTIME_TYPE": engine,
+            },
+        },
         "extra_services": {},
     }
     path.parent.mkdir(parents=True, exist_ok=True)
