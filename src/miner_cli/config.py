@@ -209,6 +209,7 @@ def write_template_config(
             "listen_host": "127.0.0.1",
             "listen_port": 8080,
             "public_ip": "${your public ip}",
+            "gpus": "all",
             "environment": {
                 "LOG_LEVEL": "info",
                 "MAIN_API_BASE_URL": "${ask for dev}",

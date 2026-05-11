@@ -8,7 +8,6 @@ import time
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
-
 from typing import Any
 
 import yaml
