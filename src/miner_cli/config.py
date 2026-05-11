@@ -199,17 +199,20 @@ def write_template_config(
             "16",
         ],
         "env": {},
-        "dcgm_exporter": {},
+        "dcgm_exporter": {
+            "enabled": False,
+            "gpus": "all"
+        },
         "miner_client": {
             "enabled": False,
-            "image": "your-registry/miner:latest",
+            "image": "lzwukeyou/miner-agent:0.0.1",
             "listen_host": "127.0.0.1",
             "listen_port": 8080,
-            "public_ip": "your public ip",
+            "public_ip": "${your public ip}",
             "environment": {
                 "LOG_LEVEL": "info",
-                "MAIN_API_BASE_URL": "https://main-api.example.com",
-                "MINER_TOKEN": "replace-me",
+                "MAIN_API_BASE_URL": "${ask for dev}",
+                "MINER_TOKEN": "${replace-me}",
                 "MINER_TARGET_MODEL": model,
                 "MINER_HOME": "/root/.miner",
                 "MINER_RUNTIME_TYPE": engine,
