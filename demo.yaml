@@ -27,7 +27,7 @@ miner_client:
   public_ip: ${public ip for vllm inference endpoint}
   gpus: all
   volumes:
-    - "/data/minerhome:/root/.miner"
+    - /data/minerhome:/root/.miner
   environment:
     LOG_LEVEL: info
     MAIN_API_BASE_URL: ${ask for dev}
