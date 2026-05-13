@@ -205,10 +205,10 @@ def write_template_config(
         },
         "miner_client": {
             "enabled": False,
-            "image": "lzwukeyou/miner-agent:0.0.1",
+            "image": "${ask for dev}",
             "listen_host": "127.0.0.1",
             "listen_port": 8080,
-            "public_ip": "${your public ip}",
+            "public_ip": "${public ip for vllm inference endpoint}",
             "gpus": "all",
             "environment": {
                 "LOG_LEVEL": "info",
