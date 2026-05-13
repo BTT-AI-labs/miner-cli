@@ -311,6 +311,8 @@ For the `miner-client` sidecar, use `miner_client`:
 miner_client:
   enabled: true
   image: your-registry/miner:latest
+  volumes:
+    - /data/minerhome:/root/.miner
   environment:
     LOG_LEVEL: info
     MAIN_API_BASE_URL: https://main-api.example.com
