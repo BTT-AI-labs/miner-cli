@@ -281,7 +281,7 @@ Operational guidance:
 
 ## Example Config
 
-See [examples/qwen72b_sglang.yaml](examples/qwen72b_sglang.yaml).
+See [examples/qwen72b_vllm.yaml](examples/qwen72b_vllm.yaml).
 
 Important fields:
 

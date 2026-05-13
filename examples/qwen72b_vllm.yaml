@@ -1,10 +1,10 @@
-name: demo
-engine: vllm
-model: Qwen/Qwen2.5-7B-Instruct
-image: vllm/vllm-openai:latest
+name: qwen72b
+engine: sglang
+model: Qwen/Qwen2.5-72B-Instruct
+image: lmsysorg/sglang:latest
 host: 0.0.0.0
 port: 8000
-tensor_parallel: 1
+tensor_parallel: 8
 gpu_ids: all
 trust_remote_code: true
 dtype: bfloat16
@@ -13,26 +13,22 @@ hf_token_env: HF_TOKEN
 hf_cache: /data/huggingface
 shm_size: 16g
 extra_args:
-- --max-num-seqs
-- '16'
+  - --schedule-policy
+  - fcfs
 env: {}
 dcgm_exporter:
-  enabled: false
+  enabled: true
   gpus: all
 miner_client:
-  enabled: false
-  image: ${ask for dev}
+  enabled: true
+  image: your-registry/miner:latest
   listen_host: 127.0.0.1
   listen_port: 8080
-  public_ip: ${public ip for vllm inference endpoint}
+  public_ip: ${your public ip}
   gpus: all
-  volumes:
-    - "/data/minerhome:/root/.miner"
   environment:
     LOG_LEVEL: info
     MAIN_API_BASE_URL: ${ask for dev}
     MINER_TOKEN: ${replace-me}
-    MINER_TARGET_MODEL: Qwen/Qwen2.5-7B-Instruct
+    MINER_TARGET_MODEL: Qwen/Qwen2.5-72B-Instruct
     MINER_HOME: /root/.miner
-    MINER_RUNTIME_TYPE: vllm
-extra_services: {}
