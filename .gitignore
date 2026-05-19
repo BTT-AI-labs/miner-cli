@@ -25,3 +25,5 @@ dist/
 
 # Local tool state
 *.log
+
+qwen37.yaml
