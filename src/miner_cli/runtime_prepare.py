@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 from pathlib import Path
 
 from .config import DeploymentConfig, image_uses_floating_latest, load_config
@@ -9,6 +10,59 @@ from .doctor import config_checks, gpu_container_smoke_test
 from .preparation import CheckResult, ProgressLogger, run_logged_command
 
 SUPPORTED_RUNTIME_ENGINES = {"vllm"}
+
+
+def _exception_detail(exc: OSError, command: list[str] | None = None) -> str:
+    if isinstance(exc, FileNotFoundError):
+        missing_command = exc.filename or (command[0] if command else "command")
+        return f"{missing_command} not found"
+    return str(exc)
+
+
+def _summarize_process_output(result: subprocess.CompletedProcess[str]) -> str:
+    lines = [
+        line.strip()
+        for line in ((result.stdout or "").splitlines() + (result.stderr or "").splitlines())
+        if line.strip()
+    ]
+    if not lines:
+        return f"exit={result.returncode}"
+
+    priority_markers = (
+        "permission denied",
+        "cannot connect",
+        "is the docker daemon running",
+        "error",
+        "failed",
+        "denied",
+        "not found",
+        "timeout",
+    )
+    for line in reversed(lines):
+        lowered = line.lower()
+        if any(marker in lowered for marker in priority_markers):
+            return line
+
+    return lines[-1]
+
+
+def _run_check_command(
+    label: str,
+    command: list[str],
+    progress: ProgressLogger | None = None,
+) -> CheckResult:
+    try:
+        result = run_logged_command(command, progress=progress)
+    except FileNotFoundError as exc:
+        return CheckResult(label, "fail", _exception_detail(exc, command))
+    except OSError as exc:
+        return CheckResult(label, "fail", _exception_detail(exc, command))
+
+    return CheckResult(
+        label,
+        "ok" if result.returncode == 0 else "fail",
+        _summarize_process_output(result),
+    )
 
 
 def resolve_runtime_config(
@@ -34,7 +88,10 @@ def resolve_runtime_config(
 
 def _ensure_cache_path(cache_path: Path) -> CheckResult:
     target = cache_path if cache_path.exists() else cache_path.parent
-    target.mkdir(parents=True, exist_ok=True)
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        return CheckResult("runtime cache path", "fail", f"{cache_path} is not writable: {exc}")
     if os.access(target, os.W_OK):
         return CheckResult("runtime cache path", "ok", f"{cache_path} is writable")
     return CheckResult("runtime cache path", "fail", f"{cache_path} is not writable")
@@ -50,17 +107,12 @@ def _hf_token_check(env_name: str, require_hf_token: bool) -> CheckResult:
 
 
 def _pull_image(image: str, progress: ProgressLogger | None = None) -> CheckResult:
-    result = run_logged_command(["docker", "pull", image], progress=progress)
-    detail = (result.stdout or result.stderr).strip()
-    return CheckResult(
-        "runtime image pull",
-        "ok" if result.returncode == 0 else "fail",
-        detail.splitlines()[-1] if detail else f"exit={result.returncode}",
-    )
+    return _run_check_command("runtime image pull", ["docker", "pull", image], progress=progress)
 
 
 def _vllm_smoke_test(image: str, progress: ProgressLogger | None = None) -> CheckResult:
-    result = run_logged_command(
+    return _run_check_command(
+        "runtime smoke test",
         [
             "docker",
             "run",
@@ -72,12 +124,6 @@ def _vllm_smoke_test(image: str, progress: ProgressLogger | None = None) -> Chec
         ],
         progress=progress,
     )
-    detail = (result.stdout or result.stderr).strip()
-    return CheckResult(
-        "runtime smoke test",
-        "ok" if result.returncode == 0 else "fail",
-        detail.splitlines()[-1] if detail else f"exit={result.returncode}",
-    )
 
 
 def engine_container_smoke_test(
@@ -86,7 +132,8 @@ def engine_container_smoke_test(
     progress: ProgressLogger | None = None,
 ) -> CheckResult:
     if engine == "vllm":
-        result = run_logged_command(
+        return _run_check_command(
+            "engine container smoke test",
             [
                 "docker",
                 "run",
@@ -97,12 +144,6 @@ def engine_container_smoke_test(
                 "--help",
             ],
             progress=progress,
-        )
-        detail = (result.stdout or result.stderr).strip()
-        return CheckResult(
-            "engine container smoke test",
-            "ok" if result.returncode == 0 else "fail",
-            detail.splitlines()[-1] if detail else f"exit={result.returncode}",
         )
 
     return CheckResult("engine container smoke test", "warn", f"no smoke test for engine: {engine}")
@@ -121,11 +162,18 @@ def prepare_runtime(
 
     if progress is not None:
         progress(f"Resolving runtime config for engine: {engine}")
-    config = resolve_runtime_config(engine, config_file)
+    try:
+        config = resolve_runtime_config(engine, config_file)
+    except Exception as exc:
+        return [CheckResult("runtime config", "fail", str(exc))]
+
     checks = [CheckResult("runtime engine", "ok", engine)]
     if progress is not None:
         progress("Running runtime preflight checks...")
-    checks.extend(config_checks(config))
+    try:
+        checks.extend(config_checks(config))
+    except Exception as exc:
+        checks.append(CheckResult("runtime preflight checks", "fail", str(exc)))
     if engine == "vllm" and image_uses_floating_latest(config.image or default_image(engine)):
         checks.append(
             CheckResult(
@@ -145,7 +193,10 @@ def prepare_runtime(
     if smoke_test:
         if progress is not None:
             progress("Running GPU container smoke test...")
-        checks.append(gpu_container_smoke_test(progress=progress))
+        try:
+            checks.append(gpu_container_smoke_test(progress=progress))
+        except OSError as exc:
+            checks.append(CheckResult("gpu container smoke test", "fail", _exception_detail(exc)))
         if progress is not None:
             progress("Running engine container startup smoke test...")
         checks.append(engine_container_smoke_test(engine, config.image or default_image(engine), progress=progress))

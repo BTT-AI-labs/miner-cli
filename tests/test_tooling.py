@@ -8,7 +8,11 @@ from typer.testing import CliRunner
 from miner_cli.cli import app
 from miner_cli.config import DeploymentConfig
 from miner_cli.preparation import CheckResult, remediation_steps
-from miner_cli.runtime_prepare import engine_container_smoke_test, prepare_runtime
+from miner_cli.runtime_prepare import (
+    _ensure_cache_path,
+    engine_container_smoke_test,
+    prepare_runtime,
+)
 from miner_cli.toolkit import (
     HostProfile,
     _component_is_ready,
@@ -150,6 +154,29 @@ def test_prepare_runtime_uses_config_file(monkeypatch, tmp_path: Path) -> None:
     assert "runtime image pull" in labels
 
 
+def test_runtime_cache_path_permission_error_returns_failure() -> None:
+    class DeniedCachePath:
+        def exists(self) -> bool:
+            return False
+
+        @property
+        def parent(self):
+            return self
+
+        def mkdir(self, parents: bool = False, exist_ok: bool = False) -> None:
+            raise PermissionError(13, "Permission denied", "/data")
+
+        def __str__(self) -> str:
+            return "/data/huggingface"
+
+    check = _ensure_cache_path(DeniedCachePath())  # type: ignore[arg-type]
+
+    assert check.label == "runtime cache path"
+    assert check.status == "fail"
+    assert "Permission denied" in check.detail
+    assert "/data" in check.detail
+
+
 def test_runtime_prepare_cli_reports_unsupported_engine() -> None:
     runner = CliRunner()
 
@@ -157,6 +184,47 @@ def test_runtime_prepare_cli_reports_unsupported_engine() -> None:
 
     assert result.exit_code == 1
     assert "Unsupported engine" in result.stdout
+
+
+def test_runtime_prepare_cli_reports_config_errors_without_traceback(tmp_path: Path) -> None:
+    runner = CliRunner()
+    config_path = tmp_path / "broken.yaml"
+    config_path.write_text("engine: vllm\nmodel: demo/model\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["runtime", "prepare", "--engine", "vllm", "-f", str(config_path)])
+
+    assert result.exit_code == 1
+    assert "runtime config" in result.stdout
+    assert "Traceback" not in result.stdout
+
+
+def test_runtime_prepare_cli_reports_smoke_failure_without_traceback(monkeypatch) -> None:
+    runner = CliRunner()
+
+    monkeypatch.setattr("miner_cli.runtime_prepare.config_checks", lambda config: [])
+    monkeypatch.setattr(
+        "miner_cli.runtime_prepare._pull_image",
+        lambda image, progress=None: CheckResult("runtime image pull", "ok", image),
+    )
+
+    def missing_docker(progress=None):
+        raise FileNotFoundError(2, "No such file or directory", "docker")
+
+    monkeypatch.setattr("miner_cli.runtime_prepare.gpu_container_smoke_test", missing_docker)
+    monkeypatch.setattr(
+        "miner_cli.runtime_prepare.engine_container_smoke_test",
+        lambda engine, image, progress=None: CheckResult("engine container smoke test", "ok", image),
+    )
+    monkeypatch.setattr(
+        "miner_cli.runtime_prepare._vllm_smoke_test",
+        lambda image, progress=None: CheckResult("runtime smoke test", "ok", image),
+    )
+
+    result = runner.invoke(app, ["runtime", "prepare", "--engine", "vllm", "--smoke-test"])
+
+    assert result.exit_code == 1
+    assert "docker not found" in result.stdout
+    assert "Traceback" not in result.stdout
 
 
 def test_init_cli_warns_on_floating_vllm_image() -> None:

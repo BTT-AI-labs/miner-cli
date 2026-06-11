@@ -138,6 +138,10 @@ def remediation_steps(checks: list[CheckResult]) -> list[str]:
             steps.append("Pin `image:` to a tested tag so upstream CUDA/driver changes do not break miner startup unexpectedly.")
         elif check.label == "runtime engine":
             steps.append("Use a supported engine value such as `vllm`.")
+        elif check.label == "runtime config":
+            steps.append("Fix the runtime YAML config and rerun `miner-cli runtime prepare`.")
+        elif check.label == "runtime preflight checks":
+            steps.append("Fix the reported preflight error and rerun `miner-cli runtime prepare`.")
         elif check.label == "post-install verify":
             steps.append(check.detail)
 
@@ -176,21 +180,43 @@ def run_logged_command(
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     if progress is None:
-        return subprocess.run(
+        try:
+            return subprocess.run(
+                command,
+                check=False,
+                text=True,
+                capture_output=True,
+                env=env,
+            )
+        except FileNotFoundError as exc:
+            missing_command = exc.filename or command[0]
+            return subprocess.CompletedProcess(
+                command,
+                127,
+                stdout="",
+                stderr=f"{missing_command} not found",
+            )
+        except OSError as exc:
+            return subprocess.CompletedProcess(command, 1, stdout="", stderr=str(exc))
+
+    try:
+        process = subprocess.Popen(
             command,
-            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
-            capture_output=True,
             env=env,
         )
+    except FileNotFoundError as exc:
+        missing_command = exc.filename or command[0]
+        message = f"{missing_command} not found"
+        progress(message)
+        return subprocess.CompletedProcess(command, 127, stdout=message, stderr="")
+    except OSError as exc:
+        message = str(exc)
+        progress(message)
+        return subprocess.CompletedProcess(command, 1, stdout=message, stderr="")
 
-    process = subprocess.Popen(
-        command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        env=env,
-    )
     output_lines: list[str] = []
     assert process.stdout is not None
     for line in process.stdout:
