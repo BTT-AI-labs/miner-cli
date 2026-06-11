@@ -3,7 +3,12 @@ from __future__ import annotations
 import pytest
 
 from miner_cli.config import DeploymentConfig
-from miner_cli.deploy import build_launch_args, build_launch_command, render_extra_services
+from miner_cli.deploy import (
+    _model_service_headers,
+    build_launch_args,
+    build_launch_command,
+    render_extra_services,
+)
 
 
 def test_build_launch_command_for_sglang_includes_expected_flags() -> None:
@@ -52,6 +57,7 @@ def test_render_extra_services_includes_miner_client() -> None:
         miner_client={
             "enabled": True,
             "image": "example/miner-client:latest",
+            "public_ip": "https://demo.example.com/v1/chat/completions",
             "listen_port": 7070,
             "host_port": 17070,
             "upstream_http_url": "http://internal-service:9000/api",
@@ -70,6 +76,36 @@ def test_render_extra_services_includes_miner_client() -> None:
     assert "MINER_DCGM_METRICS_URL: http://dcgm-exporter:9400/metrics" in rendered
     assert "UPSTREAM_HTTP_URL: http://internal-service:9000/api" in rendered
     assert "17070:7070" in rendered
+
+
+def test_render_extra_services_passes_api_key_to_miner_client() -> None:
+    config = DeploymentConfig(
+        name="demo",
+        engine="vllm",
+        model="Qwen/Qwen2.5-7B-Instruct",
+        api_key="secret",
+        miner_client={
+            "enabled": True,
+            "image": "example/miner-client:latest",
+            "public_ip": "https://demo.example.com/v1/chat/completions",
+        },
+    )
+
+    rendered = render_extra_services(config)
+
+    assert "MINER_VLLM_API_KEY: secret" in rendered
+    assert "MODELDOCK_INFERENCE_API_KEY: secret" in rendered
+
+
+def test_model_service_headers_include_authorization_when_api_key_set() -> None:
+    config = DeploymentConfig(
+        name="demo",
+        engine="vllm",
+        model="Qwen/Qwen2.5-7B-Instruct",
+        api_key="secret",
+    )
+
+    assert _model_service_headers(config) == {"Authorization": "Bearer secret"}
 
 
 def test_render_extra_services_requires_miner_client_image() -> None:

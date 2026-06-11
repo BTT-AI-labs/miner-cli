@@ -159,8 +159,19 @@ def _build_miner_client_service(config: DeploymentConfig) -> tuple[str, dict[str
     environment.setdefault("MINER_RUNTIME_TYPE", config.engine)
 
     environment.setdefault("MODELDOCK_DEPLOYMENT_NAME", config.name)
+    environment.setdefault("MODELDOCK_INFERENCE_BASE_URL", inference_base_url)
+    environment.setdefault("MODELDOCK_OPENAI_BASE_URL", f"{inference_base_url}/v1")
     environment.setdefault("MINER_VLLM_BASE_URL", inference_base_url)
+    if settings.get("upstream_http_url"):
+        environment.setdefault("UPSTREAM_HTTP_URL", settings.get("upstream_http_url"))
+    if config.api_key:
+        environment.setdefault("MINER_VLLM_API_KEY", config.api_key)
+        environment.setdefault("MODELDOCK_INFERENCE_API_KEY", config.api_key)
     if config.dcgm_exporter.get("enabled"):
+        environment.setdefault(
+            "MODELDOCK_DCGM_EXPORTER_URL",
+            f"http://dcgm-exporter:9400{dcgm_metrics_path}",
+        )
         environment.setdefault(
             "MINER_DCGM_METRICS_URL",
             f"http://dcgm-exporter:9400{dcgm_metrics_path}",
@@ -294,7 +305,8 @@ def wait_for_ready(
     url = f"{service_url(config)}/v1/models"
     while time.time() < deadline:
         try:
-            with urllib.request.urlopen(url, timeout=5) as response:
+            request = urllib.request.Request(url, headers=_model_service_headers(config))
+            with urllib.request.urlopen(request, timeout=5) as response:
                 if response.status == 200:
                     return
         except (urllib.error.URLError, TimeoutError, ConnectionError, OSError):
@@ -303,6 +315,12 @@ def wait_for_ready(
                 last_log_at = time.time()
             time.sleep(2)
     raise TimeoutError(f"Service did not become ready within {timeout}s: {url}")
+
+
+def _model_service_headers(config: DeploymentConfig) -> dict[str, str]:
+    if not config.api_key:
+        return {}
+    return {"Authorization": f"Bearer {config.api_key}"}
 
 
 def is_port_in_use(port: int, host: str = "127.0.0.1") -> bool:
